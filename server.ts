@@ -14,7 +14,6 @@ const dbPath = "fitplan.db";
 
 const db = new Database(dbPath);
 
-const db = new Database(dbPath);
 
 // Initialize Database
 db.exec(`

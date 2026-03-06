@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: coach-bellu-fitplan
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: node --loader tsx/esm server.ts
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+    disk:
+      name: fitplan-db
+      mountPath: /data
+      sizeGB: 1

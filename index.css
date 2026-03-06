@@ -1,0 +1,50 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", sans-serif;
+  --color-accent: #00F2FF;
+  --color-accent-dark: #00B4CC;
+}
+
+body {
+  @apply bg-black text-white font-sans transition-colors duration-500;
+}
+
+.light-theme body {
+  @apply bg-zinc-50 text-zinc-900;
+}
+
+.glass {
+  @apply bg-zinc-900/50 backdrop-blur-xl border border-white/10 shadow-2xl transition-all duration-500;
+}
+
+.light-theme .glass {
+  @apply bg-white/80 border-zinc-200 shadow-zinc-200/50;
+}
+
+.btn-primary {
+  @apply bg-accent text-black px-6 py-3 rounded-2xl font-black uppercase tracking-widest hover:bg-white transition-all active:scale-95 shadow-lg shadow-accent/20;
+}
+
+.light-theme .btn-primary {
+  @apply hover:bg-black hover:text-white;
+}
+
+.input-field {
+  @apply w-full bg-zinc-900 border border-white/10 rounded-2xl px-5 py-4 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-accent/50 transition-all duration-500;
+}
+
+.light-theme .input-field {
+  @apply bg-white border-zinc-200 text-zinc-900 placeholder-zinc-400 focus:ring-accent/30;
+}
+
+.athlete-box {
+  @apply bg-zinc-900/50 border border-white/10 rounded-[2.5rem] p-8 transition-all duration-300 hover:bg-zinc-800 hover:border-accent/30;
+}
+
+.light-theme .athlete-box {
+  @apply bg-white border-zinc-100 shadow-xl shadow-zinc-200/50 hover:bg-zinc-100 hover:border-accent/50;
+}
+

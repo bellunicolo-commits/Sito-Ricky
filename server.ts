@@ -10,13 +10,7 @@ import fs from "fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbPath = process.env.NODE_ENV === "production"
-  ? "/data/fitplan.db"
-  : "fitplan.db";
-
-if (process.env.NODE_ENV === "production") {
-  fs.mkdirSync("/data", { recursive: true });
-}
+const dbPath = "fitplan.db";
 
 const db = new Database(dbPath);
 

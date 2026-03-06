@@ -85,11 +85,12 @@ try { await db.execute("ALTER TABLE users ADD COLUMN bio TEXT"); } catch {}
 try { await db.execute("ALTER TABLE users ADD COLUMN notification_email TEXT"); } catch {}
 try { await db.execute("ALTER TABLE users ADD COLUMN email_notifications_enabled INTEGER DEFAULT 1"); } catch {}
 
-// Seed initial data if empty
+// Seed initial data - INSERT OR IGNORE prevents duplicates on restart
+await db.execute({ sql: "INSERT OR IGNORE INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: ["pt@coachbellu.com", "password", "Coach Bellu", "pt"] });
+await db.execute({ sql: "INSERT OR IGNORE INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: ["user@coachbellu.com", "password", "Luca Cliente", "user"] });
+
 const userCount = await db.execute("SELECT count(*) as count FROM users");
-if ((userCount.rows[0] as any).count === 0) {
-  await db.execute({ sql: "INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: ["pt@coachbellu.com", "password", "Coach Bellu", "pt"] });
-  await db.execute({ sql: "INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: ["user@coachbellu.com", "password", "Luca Cliente", "user"] });
+if ((userCount.rows[0] as any).count <= 2) {
 
   const exercises = [
     { name: "Lat Machine", category: "schiena" },

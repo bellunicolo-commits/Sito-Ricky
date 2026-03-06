@@ -1,22 +1,21 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import Database from "better-sqlite3";
+import { createClient } from "@libsql/client";
 import path from "path";
 import { fileURLToPath } from "url";
 import nodemailer from "nodemailer";
 import crypto from "crypto";
-import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbPath = "fitplan.db";
-
-const db = new Database(dbPath);
-
+const db = createClient({
+  url: process.env.TURSO_URL || "file:fitplan.db",
+  authToken: process.env.TURSO_TOKEN,
+});
 
 // Initialize Database
-db.exec(`
+await db.executeMultiple(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT UNIQUE,
@@ -78,44 +77,19 @@ db.exec(`
     user_notes TEXT,
     FOREIGN KEY(plan_id) REFERENCES plans(id)
   );
-
 `);
 
-// Migration: Ensure 'day' column exists in 'plan_items'
-try {
-  db.prepare("SELECT day FROM plan_items LIMIT 1").get();
-} catch (e) {
-  try {
-    db.exec("ALTER TABLE plan_items ADD COLUMN day TEXT DEFAULT 'Giorno A'");
-  } catch (alterErr) {
-    // Column might already exist or other error
-  }
-}
-
-// Migration: Ensure 'bio' column exists in 'users'
-try {
-  db.prepare("SELECT bio FROM users LIMIT 1").get();
-} catch (e) {
-  try {
-    db.exec("ALTER TABLE users ADD COLUMN bio TEXT");
-  } catch (alterErr) {}
-}
-
-// Migration: Ensure notification columns exist in 'users'
-try {
-  db.prepare("SELECT notification_email FROM users LIMIT 1").get();
-} catch (e) {
-  try {
-    db.exec("ALTER TABLE users ADD COLUMN notification_email TEXT");
-    db.exec("ALTER TABLE users ADD COLUMN email_notifications_enabled INTEGER DEFAULT 1");
-  } catch (alterErr) {}
-}
+// Migrations
+try { await db.execute("ALTER TABLE plan_items ADD COLUMN day TEXT DEFAULT 'Giorno A'"); } catch {}
+try { await db.execute("ALTER TABLE users ADD COLUMN bio TEXT"); } catch {}
+try { await db.execute("ALTER TABLE users ADD COLUMN notification_email TEXT"); } catch {}
+try { await db.execute("ALTER TABLE users ADD COLUMN email_notifications_enabled INTEGER DEFAULT 1"); } catch {}
 
 // Seed initial data if empty
-const userCount = db.prepare("SELECT count(*) as count FROM users").get() as { count: number };
-if (userCount.count === 0) {
-  db.prepare("INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)").run("pt@coachbellu.com", "password", "Coach Bellu", "pt");
-  db.prepare("INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)").run("user@coachbellu.com", "password", "Luca Cliente", "user");
+const userCount = await db.execute("SELECT count(*) as count FROM users");
+if ((userCount.rows[0] as any).count === 0) {
+  await db.execute({ sql: "INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: ["pt@coachbellu.com", "password", "Coach Bellu", "pt"] });
+  await db.execute({ sql: "INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: ["user@coachbellu.com", "password", "Luca Cliente", "user"] });
 
   const exercises = [
     { name: "Lat Machine", category: "schiena" },
@@ -130,11 +104,10 @@ if (userCount.count === 0) {
     { name: "Curl Bilanciere", category: "braccia" },
     { name: "Pushdown", category: "braccia" }
   ];
+  for (const ex of exercises) {
+    await db.execute({ sql: "INSERT INTO exercises (name, category) VALUES (?, ?)", args: [ex.name, ex.category] });
+  }
 
-  const insertEx = db.prepare("INSERT INTO exercises (name, category) VALUES (?, ?)");
-  exercises.forEach(ex => insertEx.run(ex.name, ex.category));
-
-  // Seed settings
   const seedSettings = [
     { key: 'about_title', value: 'Pietro Cassago' },
     { key: 'about_subtitle', value: 'Performance Elite' },
@@ -144,8 +117,9 @@ if (userCount.count === 0) {
     { key: 'about_standard', value: 'Elite' },
     { key: 'about_image', value: 'https://picsum.photos/seed/coachbellu/800/800' }
   ];
-  const insertSetting = db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)");
-  seedSettings.forEach(s => insertSetting.run(s.key, s.value));
+  for (const s of seedSettings) {
+    await db.execute({ sql: "INSERT INTO settings (key, value) VALUES (?, ?)", args: [s.key, s.value] });
+  }
 }
 
 async function startServer() {
@@ -153,18 +127,16 @@ async function startServer() {
   app.use(express.json());
   const PORT = 3000;
 
-  // API Routes
-  app.post("/api/login", (req, res) => {
+  app.post("/api/login", async (req, res) => {
     const { email, password } = req.body;
-    const user = db.prepare("SELECT id, email, name, role, bio, notification_email, email_notifications_enabled FROM users WHERE email = ? AND password = ?").get(email, password);
-    if (user) {
-      res.json(user);
+    const result = await db.execute({ sql: "SELECT id, email, name, role, bio, notification_email, email_notifications_enabled FROM users WHERE email = ? AND password = ?", args: [email, password] });
+    if (result.rows.length > 0) {
+      res.json(result.rows[0]);
     } else {
       res.status(401).json({ error: "Credenziali non valide" });
     }
   });
 
-  // Mailer Setup
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || "smtp.ethereal.email",
     port: parseInt(process.env.SMTP_PORT || "587"),
@@ -188,231 +160,188 @@ async function startServer() {
 
   app.post("/api/forgot-password", async (req, res) => {
     const { email } = req.body;
-    const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+    const result = await db.execute({ sql: "SELECT * FROM users WHERE email = ?", args: [email] });
+    const user = result.rows[0] as any;
     if (user) {
       const token = crypto.randomBytes(32).toString("hex");
-      const expires = new Date(Date.now() + 3600000).toISOString(); // 1 hour
-      db.prepare("INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)").run(user.id, token, expires);
-      
+      const expires = new Date(Date.now() + 3600000).toISOString();
+      await db.execute({ sql: "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)", args: [user.id, token, expires] });
       const resetUrl = `${req.headers.origin}/reset-password?token=${token}`;
       await sendMail(email, "Reset Password - Coach Bellu", `Ciao ${user.name}, clicca qui per resettare la tua password: ${resetUrl}`);
-      
       res.json({ message: "Email di recupero inviata con successo!" });
     } else {
       res.status(404).json({ error: "Email non trovata" });
     }
   });
 
-  app.post("/api/reset-password", (req, res) => {
+  app.post("/api/reset-password", async (req, res) => {
     const { token, password } = req.body;
-    const resetToken = db.prepare("SELECT * FROM password_reset_tokens WHERE token = ? AND expires_at > ?").get(token, new Date().toISOString()) as any;
-    
+    const result = await db.execute({ sql: "SELECT * FROM password_reset_tokens WHERE token = ? AND expires_at > ?", args: [token, new Date().toISOString()] });
+    const resetToken = result.rows[0] as any;
     if (resetToken) {
-      db.prepare("UPDATE users SET password = ? WHERE id = ?").run(password, resetToken.user_id);
-      db.prepare("DELETE FROM password_reset_tokens WHERE id = ?").run(resetToken.id);
+      await db.execute({ sql: "UPDATE users SET password = ? WHERE id = ?", args: [password, resetToken.user_id] });
+      await db.execute({ sql: "DELETE FROM password_reset_tokens WHERE id = ?", args: [resetToken.id] });
       res.json({ message: "Password aggiornata con successo!" });
     } else {
       res.status(400).json({ error: "Token non valido o scaduto" });
     }
   });
 
-  // Messaging & Notifications
   app.post("/api/messages", async (req, res) => {
     const { sender_id, receiver_id, content } = req.body;
-    const { lastInsertRowid } = db.prepare("INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)").run(sender_id, receiver_id, content);
-    
-    // Notify receiver if they are a coach and have email enabled
-    const receiver = db.prepare("SELECT * FROM users WHERE id = ?").get(receiver_id) as any;
+    const result = await db.execute({ sql: "INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)", args: [sender_id, receiver_id, content] });
+    const receiver = (await db.execute({ sql: "SELECT * FROM users WHERE id = ?", args: [receiver_id] })).rows[0] as any;
     if (receiver && receiver.role === 'pt' && receiver.email_notifications_enabled) {
-      const sender = db.prepare("SELECT name FROM users WHERE id = ?").get(sender_id) as any;
+      const sender = (await db.execute({ sql: "SELECT name FROM users WHERE id = ?", args: [sender_id] })).rows[0] as any;
       const targetEmail = receiver.notification_email || receiver.email;
       await sendMail(targetEmail, "Nuova Notifica - Coach Bellu", `Hai ricevuto un nuovo messaggio da ${sender.name}: "${content}"`);
     }
-    
-    res.json({ id: lastInsertRowid, sender_id, receiver_id, content });
+    res.json({ id: result.lastInsertRowid, sender_id, receiver_id, content });
   });
 
-  app.get("/api/messages/:userId", (req, res) => {
+  app.get("/api/messages/:userId", async (req, res) => {
     const { userId } = req.params;
     const { otherId } = req.query;
-    const messages = db.prepare(`
-      SELECT * FROM messages 
-      WHERE (sender_id = ? AND receiver_id = ?) 
-         OR (sender_id = ? AND receiver_id = ?)
-      ORDER BY created_at ASC
-    `).all(userId, otherId, otherId, userId);
-    res.json(messages);
+    const result = await db.execute({ sql: `SELECT * FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY created_at ASC`, args: [userId, otherId, otherId, userId] });
+    res.json(result.rows);
   });
 
-  app.get("/api/notifications/:userId", (req, res) => {
-    const messages = db.prepare(`
-      SELECT m.*, u.name as sender_name 
-      FROM messages m
-      JOIN users u ON m.sender_id = u.id
-      WHERE m.receiver_id = ? AND m.is_read = 0
-      ORDER BY m.created_at DESC
-    `).all(req.params.userId);
-    res.json(messages);
+  app.get("/api/notifications/:userId", async (req, res) => {
+    const result = await db.execute({ sql: `SELECT m.*, u.name as sender_name FROM messages m JOIN users u ON m.sender_id = u.id WHERE m.receiver_id = ? AND m.is_read = 0 ORDER BY m.created_at DESC`, args: [req.params.userId] });
+    res.json(result.rows);
   });
 
-  app.patch("/api/messages/read", (req, res) => {
+  app.patch("/api/messages/read", async (req, res) => {
     const { receiverId, senderId } = req.body;
-    db.prepare("UPDATE messages SET is_read = 1 WHERE receiver_id = ? AND sender_id = ?").run(receiverId, senderId);
+    await db.execute({ sql: "UPDATE messages SET is_read = 1 WHERE receiver_id = ? AND sender_id = ?", args: [receiverId, senderId] });
     res.json({ success: true });
   });
 
-  app.patch("/api/users/:id/notifications", (req, res) => {
+  app.patch("/api/users/:id/notifications", async (req, res) => {
     const { notification_email, email_notifications_enabled } = req.body;
-    db.prepare("UPDATE users SET notification_email = ?, email_notifications_enabled = ? WHERE id = ?").run(notification_email, email_notifications_enabled ? 1 : 0, req.params.id);
+    await db.execute({ sql: "UPDATE users SET notification_email = ?, email_notifications_enabled = ? WHERE id = ?", args: [notification_email, email_notifications_enabled ? 1 : 0, req.params.id] });
     res.json({ success: true });
   });
 
-  app.post("/api/register", (req, res) => {
+  app.post("/api/register", async (req, res) => {
     const { email, password, name } = req.body;
-    const role = 'user'; // Only allow user registration
     try {
-      const { lastInsertRowid } = db.prepare("INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)").run(email, password, name, role);
-      res.json({ id: lastInsertRowid, email, name, role });
+      const result = await db.execute({ sql: "INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: [email, password, name, 'user'] });
+      res.json({ id: result.lastInsertRowid, email, name, role: 'user' });
     } catch (err) {
       res.status(400).json({ error: "Email già registrata" });
     }
   });
 
-  app.get("/api/users", (req, res) => {
-    // Return users info, including password for the coach dashboard
-    const users = db.prepare("SELECT id, name, email, password, role, bio FROM users WHERE role = 'user'").all();
-    res.json(users);
+  app.get("/api/users", async (req, res) => {
+    const result = await db.execute("SELECT id, name, email, password, role, bio FROM users WHERE role = 'user'");
+    res.json(result.rows);
   });
 
-  app.get("/api/coach", (req, res) => {
-    const coach = db.prepare("SELECT id, name, email, role, bio FROM users WHERE role = 'pt' LIMIT 1").get();
-    if (coach) {
-      res.json(coach);
+  app.get("/api/coach", async (req, res) => {
+    const result = await db.execute("SELECT id, name, email, role, bio FROM users WHERE role = 'pt' LIMIT 1");
+    if (result.rows.length > 0) {
+      res.json(result.rows[0]);
     } else {
       res.status(404).json({ error: "Coach non trovato" });
     }
   });
 
-  app.patch("/api/users/:id", (req, res) => {
+  app.patch("/api/users/:id", async (req, res) => {
     const { name, email, bio } = req.body;
     try {
-      db.prepare("UPDATE users SET name = ?, email = ?, bio = ? WHERE id = ?").run(name, email, bio, req.params.id);
+      await db.execute({ sql: "UPDATE users SET name = ?, email = ?, bio = ? WHERE id = ?", args: [name, email, bio, req.params.id] });
       res.json({ success: true });
     } catch (err) {
       res.status(400).json({ error: "Email già in uso o dati non validi" });
     }
   });
 
-  app.delete("/api/users/:id", (req, res) => {
-    const transaction = db.transaction(() => {
-      // Delete user's plans and items first
-      const plans = db.prepare("SELECT id FROM plans WHERE user_id = ?").all(req.params.id) as { id: number }[];
-      for (const plan of plans) {
-        db.prepare("DELETE FROM plan_items WHERE plan_id = ?").run(plan.id);
-      }
-      db.prepare("DELETE FROM plans WHERE user_id = ?").run(req.params.id);
-      db.prepare("DELETE FROM users WHERE id = ?").run(req.params.id);
-    });
-    transaction();
+  app.delete("/api/users/:id", async (req, res) => {
+    const plans = (await db.execute({ sql: "SELECT id FROM plans WHERE user_id = ?", args: [req.params.id] })).rows as { id: number }[];
+    for (const plan of plans) {
+      await db.execute({ sql: "DELETE FROM plan_items WHERE plan_id = ?", args: [plan.id] });
+    }
+    await db.execute({ sql: "DELETE FROM plans WHERE user_id = ?", args: [req.params.id] });
+    await db.execute({ sql: "DELETE FROM users WHERE id = ?", args: [req.params.id] });
     res.json({ success: true });
   });
 
-  app.get("/api/exercises", (req, res) => {
-    const exercises = db.prepare("SELECT * FROM exercises ORDER BY category, name").all();
-    res.json(exercises);
+  app.get("/api/exercises", async (req, res) => {
+    const result = await db.execute("SELECT * FROM exercises ORDER BY category, name");
+    res.json(result.rows);
   });
 
-  app.post("/api/exercises", (req, res) => {
+  app.post("/api/exercises", async (req, res) => {
     const { name, category } = req.body;
-    const { lastInsertRowid } = db.prepare("INSERT INTO exercises (name, category) VALUES (?, ?)").run(name, category);
-    res.json({ id: lastInsertRowid, name, category });
+    const result = await db.execute({ sql: "INSERT INTO exercises (name, category) VALUES (?, ?)", args: [name, category] });
+    res.json({ id: result.lastInsertRowid, name, category });
   });
 
-  app.patch("/api/exercises/:id", (req, res) => {
+  app.patch("/api/exercises/:id", async (req, res) => {
     const { name, category } = req.body;
-    db.prepare("UPDATE exercises SET name = ?, category = ? WHERE id = ?").run(name, category, req.params.id);
+    await db.execute({ sql: "UPDATE exercises SET name = ?, category = ? WHERE id = ?", args: [name, category, req.params.id] });
     res.json({ success: true });
   });
 
-  app.delete("/api/exercises/:id", (req, res) => {
-    db.prepare("DELETE FROM exercises WHERE id = ?").run(req.params.id);
+  app.delete("/api/exercises/:id", async (req, res) => {
+    await db.execute({ sql: "DELETE FROM exercises WHERE id = ?", args: [req.params.id] });
     res.json({ success: true });
   });
 
-  app.delete("/api/plans/:id", (req, res) => {
-    const transaction = db.transaction(() => {
-      db.prepare("DELETE FROM plan_items WHERE plan_id = ?").run(req.params.id);
-      db.prepare("DELETE FROM plans WHERE id = ?").run(req.params.id);
-    });
-    transaction();
+  app.delete("/api/plans/:id", async (req, res) => {
+    await db.execute({ sql: "DELETE FROM plan_items WHERE plan_id = ?", args: [req.params.id] });
+    await db.execute({ sql: "DELETE FROM plans WHERE id = ?", args: [req.params.id] });
     res.json({ success: true });
   });
 
-  app.get("/api/plans/:userId/history", (req, res) => {
-    const plans = db.prepare("SELECT * FROM plans WHERE user_id = ? ORDER BY created_at DESC").all(req.params.userId);
-    const plansWithItems = plans.map(plan => {
-      const items = db.prepare("SELECT * FROM plan_items WHERE plan_id = ?").all(plan.id);
+  app.get("/api/plans/:userId/history", async (req, res) => {
+    const plans = (await db.execute({ sql: "SELECT * FROM plans WHERE user_id = ? ORDER BY created_at DESC", args: [req.params.userId] })).rows;
+    const plansWithItems = await Promise.all(plans.map(async (plan: any) => {
+      const items = (await db.execute({ sql: "SELECT * FROM plan_items WHERE plan_id = ?", args: [plan.id] })).rows;
       return { ...plan, items };
-    });
+    }));
     res.json(plansWithItems);
   });
 
-  app.get("/api/plans/:userId", (req, res) => {
-    const plan = db.prepare("SELECT * FROM plans WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(req.params.userId);
-    if (!plan) return res.json(null);
-    
-    const items = db.prepare("SELECT * FROM plan_items WHERE plan_id = ?").all(plan.id);
+  app.get("/api/plans/:userId", async (req, res) => {
+    const result = await db.execute({ sql: "SELECT * FROM plans WHERE user_id = ? ORDER BY created_at DESC LIMIT 1", args: [req.params.userId] });
+    if (result.rows.length === 0) return res.json(null);
+    const plan = result.rows[0] as any;
+    const items = (await db.execute({ sql: "SELECT * FROM plan_items WHERE plan_id = ?", args: [plan.id] })).rows;
     res.json({ ...plan, items });
   });
 
-  app.post("/api/plans", (req, res) => {
+  app.post("/api/plans", async (req, res) => {
     const { userId, ptId, items } = req.body;
-    
-    const transaction = db.transaction(() => {
-      const { lastInsertRowid } = db.prepare("INSERT INTO plans (user_id, pt_id) VALUES (?, ?)").run(userId, ptId);
-      const planId = lastInsertRowid;
-
-      const insertItem = db.prepare(`
-        INSERT INTO plan_items (plan_id, day, exercise_name, category, sets, reps, pt_notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `);
-
-      for (const item of items) {
-        insertItem.run(planId, item.day || 'Giorno A', item.exercise_name, item.category, item.sets, item.reps, item.pt_notes);
-      }
-      return planId;
-    });
-
-    const planId = transaction();
+    const planResult = await db.execute({ sql: "INSERT INTO plans (user_id, pt_id) VALUES (?, ?)", args: [userId, ptId] });
+    const planId = planResult.lastInsertRowid;
+    for (const item of items) {
+      await db.execute({ sql: "INSERT INTO plan_items (plan_id, day, exercise_name, category, sets, reps, pt_notes) VALUES (?, ?, ?, ?, ?, ?, ?)", args: [planId, item.day || 'Giorno A', item.exercise_name, item.category, item.sets, item.reps, item.pt_notes] });
+    }
     res.json({ id: planId });
   });
 
-  app.patch("/api/plan-items/:itemId", (req, res) => {
+  app.patch("/api/plan-items/:itemId", async (req, res) => {
     const { user_notes } = req.body;
-    db.prepare("UPDATE plan_items SET user_notes = ? WHERE id = ?").run(user_notes, req.params.itemId);
+    await db.execute({ sql: "UPDATE plan_items SET user_notes = ? WHERE id = ?", args: [user_notes, req.params.itemId] });
     res.json({ success: true });
   });
 
-  // Settings Endpoints
-  app.get("/api/settings", (req, res) => {
-    const settings = db.prepare("SELECT * FROM settings").all() as { key: string, value: string }[];
-    const settingsObj = settings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {});
+  app.get("/api/settings", async (req, res) => {
+    const result = await db.execute("SELECT * FROM settings");
+    const settingsObj = result.rows.reduce((acc: any, s: any) => ({ ...acc, [s.key]: s.value }), {});
     res.json(settingsObj);
   });
 
-  app.patch("/api/settings", (req, res) => {
+  app.patch("/api/settings", async (req, res) => {
     const settings = req.body;
-    const updateSetting = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
-    const transaction = db.transaction(() => {
-      for (const [key, value] of Object.entries(settings)) {
-        updateSetting.run(key, value);
-      }
-    });
-    transaction();
+    for (const [key, value] of Object.entries(settings)) {
+      await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", args: [key, value] });
+    }
     res.json({ success: true });
   });
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

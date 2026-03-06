@@ -9,9 +9,16 @@ import crypto from "crypto";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+import fs from "fs";
+
 const dbPath = process.env.NODE_ENV === "production"
   ? "/data/fitplan.db"
   : "fitplan.db";
+
+if (process.env.NODE_ENV === "production") {
+  fs.mkdirSync("/data", { recursive: true });
+}
+
 const db = new Database(dbPath);
 
 // Initialize Database

@@ -5,11 +5,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 import nodemailer from "nodemailer";
 import crypto from "crypto";
+import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-import fs from "fs";
 
 const dbPath = process.env.NODE_ENV === "production"
   ? "/data/fitplan.db"
@@ -18,6 +17,8 @@ const dbPath = process.env.NODE_ENV === "production"
 if (process.env.NODE_ENV === "production") {
   fs.mkdirSync("/data", { recursive: true });
 }
+
+const db = new Database(dbPath);
 
 const db = new Database(dbPath);
 

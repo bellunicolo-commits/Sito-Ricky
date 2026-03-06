@@ -230,7 +230,13 @@ async function startServer() {
       const result = await db.execute({ sql: "INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: [email, password, name, 'user'] });
       res.json({ id: result.lastInsertRowid, email, name, role: 'user' });
     } catch (err) {
-      res.status(400).json({ error: "Email già registrata" });
+      // Check if user was just created (race condition on double start)
+      const existing = await db.execute({ sql: "SELECT id, email, name, role FROM users WHERE email = ? AND password = ?", args: [email, password] });
+      if (existing.rows.length > 0) {
+        res.json(existing.rows[0]);
+      } else {
+        res.status(400).json({ error: "Email già registrata" });
+      }
     }
   });
 

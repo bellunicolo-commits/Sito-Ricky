@@ -1000,11 +1000,8 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
         </button>
       </div>
       <div className="relative">
-        <div className="absolute left-8 top-1/2 -translate-y-1/2">
-          <Search className="w-6 h-6 text-zinc-400" />
-        </div>
         <input 
-          className={`input-field pl-20 py-8 text-xl font-bold rounded-[2.5rem] transition-all ${theme === 'light' ? 'bg-white border-zinc-200' : 'bg-zinc-900/50 border-white/5 focus:bg-zinc-900'}`} 
+          className={`input-field py-8 text-xl font-bold rounded-[2.5rem] transition-all ${theme === 'light' ? 'bg-white border-zinc-200' : 'bg-zinc-900/50 border-white/5 focus:bg-zinc-900'}`} 
           placeholder="Cerca modello per nome, descrizione, keyword..." 
           value={searchTerm} 
           onChange={e => setSearchTerm(e.target.value)} 

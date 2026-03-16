@@ -9,6 +9,11 @@ import crypto from "crypto";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// BigInt serialization support
+(BigInt.prototype as any).toJSON = function () {
+  return this.toString();
+};
+
 const db = createClient({
   url: process.env.TURSO_URL || "file:fitplan.db",
   authToken: process.env.TURSO_TOKEN,
@@ -24,7 +29,11 @@ await db.executeMultiple(`
     role TEXT CHECK(role IN ('pt', 'user')),
     bio TEXT,
     notification_email TEXT,
-    email_notifications_enabled INTEGER DEFAULT 1
+    email_notifications_enabled INTEGER DEFAULT 1,
+    contract_start TEXT,
+    contract_end TEXT,
+    experience_years INTEGER,
+    age INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS password_reset_tokens (
@@ -54,7 +63,8 @@ await db.executeMultiple(`
   CREATE TABLE IF NOT EXISTS exercises (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT,
-    category TEXT
+    category TEXT,
+    muscle_group TEXT
   );
 
   CREATE TABLE IF NOT EXISTS plans (
@@ -75,7 +85,29 @@ await db.executeMultiple(`
     reps TEXT,
     pt_notes TEXT,
     user_notes TEXT,
+    recovery TEXT,
+    notes TEXT,
     FOREIGN KEY(plan_id) REFERENCES plans(id)
+  );
+  CREATE TABLE IF NOT EXISTS models (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS model_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id INTEGER,
+    day TEXT,
+    exercise_name TEXT,
+    category TEXT,
+    sets TEXT,
+    reps TEXT,
+    pt_notes TEXT,
+    recovery TEXT,
+    notes TEXT,
+    FOREIGN KEY(model_id) REFERENCES models(id)
   );
 `);
 
@@ -84,6 +116,15 @@ try { await db.execute("ALTER TABLE plan_items ADD COLUMN day TEXT DEFAULT 'Gior
 try { await db.execute("ALTER TABLE users ADD COLUMN bio TEXT"); } catch {}
 try { await db.execute("ALTER TABLE users ADD COLUMN notification_email TEXT"); } catch {}
 try { await db.execute("ALTER TABLE users ADD COLUMN email_notifications_enabled INTEGER DEFAULT 1"); } catch {}
+try { await db.execute("ALTER TABLE users ADD COLUMN contract_start TEXT"); } catch {}
+try { await db.execute("ALTER TABLE users ADD COLUMN contract_end TEXT"); } catch {}
+try { await db.execute("ALTER TABLE users ADD COLUMN experience_years INTEGER"); } catch {}
+try { await db.execute("ALTER TABLE users ADD COLUMN age INTEGER"); } catch {}
+try { await db.execute("ALTER TABLE exercises ADD COLUMN muscle_group TEXT"); } catch {}
+try { await db.execute("ALTER TABLE plan_items ADD COLUMN recovery TEXT"); } catch {}
+try { await db.execute("ALTER TABLE plan_items ADD COLUMN notes TEXT"); } catch {}
+try { await db.execute("ALTER TABLE model_items ADD COLUMN recovery TEXT"); } catch {}
+try { await db.execute("ALTER TABLE model_items ADD COLUMN notes TEXT"); } catch {}
 
 // Seed initial data - INSERT OR IGNORE prevents duplicates on restart
 await db.execute({ sql: "INSERT OR IGNORE INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: ["pt@coachbellu.com", "password", "Coach Bellu", "pt"] });
@@ -106,7 +147,16 @@ if ((userCount.rows[0] as any).count <= 2) {
     { name: "Pushdown", category: "braccia" }
   ];
   for (const ex of exercises) {
-    await db.execute({ sql: "INSERT INTO exercises (name, category) VALUES (?, ?)", args: [ex.name, ex.category] });
+    // We don't have unique constraint on exercises name in the schema, but we shouldn't insert duplicates anyway.
+    // However, since there's no unique constraint, INSERT OR IGNORE won't work on exercises if they exist.
+    // Instead we can just check if table is empty. But let's just use INSERT OR IGNORE on settings since it has key UNIQUE.
+  }
+
+  const exCount = await db.execute("SELECT count(*) as count FROM exercises");
+  if ((exCount.rows[0] as any).count === 0) {
+    for (const ex of exercises) {
+      await db.execute({ sql: "INSERT INTO exercises (name, category) VALUES (?, ?)", args: [ex.name, ex.category] });
+    }
   }
 
   const seedSettings = [
@@ -119,7 +169,7 @@ if ((userCount.rows[0] as any).count <= 2) {
     { key: 'about_image', value: 'https://picsum.photos/seed/coachbellu/800/800' }
   ];
   for (const s of seedSettings) {
-    await db.execute({ sql: "INSERT INTO settings (key, value) VALUES (?, ?)", args: [s.key, s.value] });
+    await db.execute({ sql: "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", args: [s.key, s.value] });
   }
 }
 
@@ -130,7 +180,7 @@ async function startServer() {
 
   app.post("/api/login", async (req, res) => {
     const { email, password } = req.body;
-    const result = await db.execute({ sql: "SELECT id, email, name, role, bio, notification_email, email_notifications_enabled FROM users WHERE email = ? AND password = ?", args: [email, password] });
+    const result = await db.execute({ sql: "SELECT id, email, name, role, bio, notification_email, email_notifications_enabled, contract_start, contract_end, experience_years, age FROM users WHERE email = ? AND password = ?", args: [email, password] });
     if (result.rows.length > 0) {
       res.json(result.rows[0]);
     } else {
@@ -203,7 +253,7 @@ async function startServer() {
   app.get("/api/messages/:userId", async (req, res) => {
     const { userId } = req.params;
     const { otherId } = req.query;
-    const result = await db.execute({ sql: `SELECT * FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY created_at ASC`, args: [userId, otherId, otherId, userId] });
+    const result = await db.execute({ sql: `SELECT * FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY created_at ASC`, args: [userId, otherId as string, otherId as string, userId] });
     res.json(result.rows);
   });
 
@@ -241,7 +291,7 @@ async function startServer() {
   });
 
   app.get("/api/users", async (req, res) => {
-    const result = await db.execute("SELECT id, name, email, password, role, bio FROM users WHERE role = 'user'");
+    const result = await db.execute("SELECT id, name, email, password, role, bio, contract_start, contract_end, experience_years, age FROM users WHERE role = 'user'");
     res.json(result.rows);
   });
 
@@ -255,17 +305,36 @@ async function startServer() {
   });
 
   app.patch("/api/users/:id", async (req, res) => {
-    const { name, email, bio } = req.body;
+    const { name, email, bio, contract_start, contract_end, experience_years, age } = req.body;
     try {
-      await db.execute({ sql: "UPDATE users SET name = ?, email = ?, bio = ? WHERE id = ?", args: [name, email, bio, req.params.id] });
+      await db.execute({ 
+        sql: "UPDATE users SET name = ?, email = ?, bio = ?, contract_start = ?, contract_end = ?, experience_years = ?, age = ? WHERE id = ?", 
+        args: [name, email, bio, contract_start, contract_end, experience_years, age, req.params.id] 
+      });
       res.json({ success: true });
     } catch (err) {
       res.status(400).json({ error: "Email già in uso o dati non validi" });
     }
   });
 
+  // Clean up duplicate exercises on startup
+  try {
+    const allEx = await db.execute("SELECT id, name FROM exercises");
+    const seen = new Set();
+    for (const ex of allEx.rows as any[]) {
+      if (seen.has(ex.name)) {
+        await db.execute({ sql: "DELETE FROM exercises WHERE id = ?", args: [ex.id] });
+      } else {
+        seen.add(ex.name);
+      }
+    }
+  } catch (err) {
+    console.error("Error cleaning up exercises:", err);
+  }
+
   app.delete("/api/users/:id", async (req, res) => {
-    const plans = (await db.execute({ sql: "SELECT id FROM plans WHERE user_id = ?", args: [req.params.id] })).rows as { id: number }[];
+    const plansResult = await db.execute({ sql: "SELECT id FROM plans WHERE user_id = ?", args: [req.params.id] });
+    const plans = plansResult.rows as unknown as { id: number }[];
     for (const plan of plans) {
       await db.execute({ sql: "DELETE FROM plan_items WHERE plan_id = ?", args: [plan.id] });
     }
@@ -280,14 +349,45 @@ async function startServer() {
   });
 
   app.post("/api/exercises", async (req, res) => {
-    const { name, category } = req.body;
-    const result = await db.execute({ sql: "INSERT INTO exercises (name, category) VALUES (?, ?)", args: [name, category] });
-    res.json({ id: result.lastInsertRowid, name, category });
+    const { name, category, muscle_group } = req.body;
+    const result = await db.execute({ sql: "INSERT INTO exercises (name, category, muscle_group) VALUES (?, ?, ?)", args: [name, category, muscle_group] });
+    res.json({ id: result.lastInsertRowid, name, category, muscle_group });
+  });
+
+  app.get("/api/models", async (req, res) => {
+    const modelsResult = await db.execute("SELECT * FROM models ORDER BY created_at DESC");
+    const models = modelsResult.rows;
+    const modelsWithItems = await Promise.all(models.map(async (model: any) => {
+      const items = (await db.execute({ sql: "SELECT * FROM model_items WHERE model_id = ?", args: [model.id] })).rows;
+      return { ...model, items };
+    }));
+    res.json(modelsWithItems);
+  });
+  
+  app.get("/api/models/:id/items", async (req, res) => {
+    const items = (await db.execute({ sql: "SELECT * FROM model_items WHERE model_id = ?", args: [req.params.id] })).rows;
+    res.json(items);
+  });
+  
+  app.post("/api/models", async (req, res) => {
+    const { name, description, items } = req.body;
+    const modelResult = await db.execute({ sql: "INSERT INTO models (name, description) VALUES (?, ?)", args: [name, description] });
+    const modelId = modelResult.lastInsertRowid;
+    for (const item of items) {
+      await db.execute({ sql: "INSERT INTO model_items (model_id, day, exercise_name, category, sets, reps, pt_notes, recovery, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", args: [modelId, item.day || 'Giorno A', item.exercise_name, item.category, item.sets, item.reps, item.pt_notes || '', item.recovery || '', item.notes || ''] as any });
+    }
+    res.json({ id: modelId });
+  });
+
+  app.delete("/api/models/:id", async (req, res) => {
+    await db.execute({ sql: "DELETE FROM model_items WHERE model_id = ?", args: [req.params.id] });
+    await db.execute({ sql: "DELETE FROM models WHERE id = ?", args: [req.params.id] });
+    res.json({ success: true });
   });
 
   app.patch("/api/exercises/:id", async (req, res) => {
-    const { name, category } = req.body;
-    await db.execute({ sql: "UPDATE exercises SET name = ?, category = ? WHERE id = ?", args: [name, category, req.params.id] });
+    const { name, category, muscle_group } = req.body;
+    await db.execute({ sql: "UPDATE exercises SET name = ?, category = ?, muscle_group = ? WHERE id = ?", args: [name, category, muscle_group, req.params.id] });
     res.json({ success: true });
   });
 
@@ -324,7 +424,7 @@ async function startServer() {
     const planResult = await db.execute({ sql: "INSERT INTO plans (user_id, pt_id) VALUES (?, ?)", args: [userId, ptId] });
     const planId = planResult.lastInsertRowid;
     for (const item of items) {
-      await db.execute({ sql: "INSERT INTO plan_items (plan_id, day, exercise_name, category, sets, reps, pt_notes) VALUES (?, ?, ?, ?, ?, ?, ?)", args: [planId, item.day || 'Giorno A', item.exercise_name, item.category, item.sets, item.reps, item.pt_notes] });
+      await db.execute({ sql: "INSERT INTO plan_items (plan_id, day, exercise_name, category, sets, reps, pt_notes, recovery, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", args: [planId, item.day || 'Giorno A', item.exercise_name, item.category, item.sets, item.reps, item.pt_notes || '', item.recovery || '', item.notes || ''] as any });
     }
     res.json({ id: planId });
   });

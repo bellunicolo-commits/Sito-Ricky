@@ -4,9 +4,10 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", sans-serif;
-  --color-accent: #00F2FF;
-  --color-accent-dark: #00B4CC;
+  --color-accent: #2350D1;
+  --color-accent-dark: #1A3C9D;
 }
+
 
 body {
   @apply bg-black text-white font-sans transition-colors duration-500;

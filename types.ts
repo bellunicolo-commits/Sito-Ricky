@@ -9,6 +9,10 @@ export interface User {
   password?: string;
   notification_email?: string;
   email_notifications_enabled?: number;
+  contract_start?: string;
+  contract_end?: string;
+  experience_years?: number;
+  age?: number;
 }
 
 export interface Message {
@@ -25,6 +29,7 @@ export interface Exercise {
   id: number;
   name: string;
   category: string;
+  muscle_group?: string;
 }
 
 export interface PlanItem {
@@ -36,6 +41,8 @@ export interface PlanItem {
   reps: string;
   pt_notes: string;
   user_notes?: string;
+  recovery?: string;
+  notes?: string;
 }
 
 export interface Plan {
@@ -45,3 +52,12 @@ export interface Plan {
   created_at: string;
   items: PlanItem[];
 }
+
+export interface ModelPlan {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  items?: PlanItem[];
+}
+

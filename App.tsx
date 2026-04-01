@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   Clock,
   Eye,
+  EyeOff,
   ArrowLeft,
   UserPlus,
   Settings,
@@ -33,19 +34,31 @@ import {
   Send,
   ShieldCheck,
   TrendingUp,
-  AlertCircle
+  AlertCircle,
+  Home
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { User, Plan, Exercise, PlanItem, Role, ModelPlan } from './types';
+
+const getDaysRemaining = (endDate?: string) => {
+  if (!endDate) return null;
+  const end = new Date(endDate);
+  const now = new Date();
+  const diffTime = end.getTime() - now.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays;
+};
 
 // --- Components ---
 
 const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [isForgot, setIsForgot] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -55,6 +68,12 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
     e.preventDefault();
     setError('');
     setMessage('');
+
+    if (!isLogin && !isForgot && !privacyAccepted) {
+      setError('Devi accettare la Privacy Policy per registrarti.');
+      return;
+    }
+
     setLoading(true);
 
     if (isForgot) {
@@ -125,7 +144,7 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
         </div>
         <h1 className="text-4xl font-display font-black text-center mb-2 text-white italic tracking-tighter uppercase">Coach Bellu</h1>
         <p className="text-zinc-500 text-center mb-10 font-bold uppercase tracking-widest text-[10px]">
-          {isForgot ? 'Recupero Password' : (isLogin ? 'Bentornato, Atleta' : 'Inizia la tua trasformazione')}
+          {isForgot ? 'Recupero Password' : (isLogin ? 'Accedi al tuo account' : 'Crea il tuo account')}
         </p>
         
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -135,7 +154,7 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
               <input 
                 type="text" 
                 className="input-field" 
-                placeholder="Mario Rossi"
+                placeholder="Inserisci nome e cognome"
                 value={name} 
                 onChange={(e) => setName(e.target.value)}
                 required
@@ -147,23 +166,48 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
             <input 
               type="email" 
               className="input-field" 
-              placeholder="atleta@esempio.com"
+              placeholder="Inserisci la tua email"
               value={email} 
               onChange={(e) => setEmail(e.target.value)}
               required
             />
           </div>
           {!isForgot && (
-            <div>
+            <div className="relative">
               <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 ml-1">Password</label>
+              <div className="relative">
+                <input 
+                  type={showPassword ? "text" : "password"} 
+                  className="input-field pr-14" 
+                  placeholder="••••••••"
+                  value={password} 
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button 
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-zinc-600 hover:accent transition-all"
+                  title={showPassword ? "Nascondi Password" : "Mostra Password"}
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
+            </div>
+          )}
+          {!isLogin && !isForgot && (
+            <div className="flex items-start gap-3 mt-4">
               <input 
-                type="password" 
-                className="input-field" 
-                placeholder="••••••••"
-                value={password} 
-                onChange={(e) => setPassword(e.target.value)}
+                type="checkbox" 
+                id="privacy" 
+                checked={privacyAccepted} 
+                onChange={(e) => setPrivacyAccepted(e.target.checked)} 
+                className="mt-1"
                 required
               />
+              <label htmlFor="privacy" className="text-[10px] text-zinc-500 uppercase tracking-widest leading-relaxed">
+                Ho letto e accetto la <a href="/privacy" className="text-accent hover:underline">Privacy Policy</a>, compreso il trattamento dei dati personali relativi alla salute.
+              </label>
             </div>
           )}
           {error && <p className="text-red-400 text-[10px] font-black uppercase tracking-widest text-center">{error}</p>}
@@ -200,11 +244,6 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
             </button>
           )}
         </div>
-        
-        <div className="mt-12 pt-8 border-t border-white/5 flex justify-between text-[10px] font-black uppercase tracking-widest text-zinc-700">
-          <button onClick={() => { setEmail('pt@coachbellu.com'); setPassword('password'); setIsLogin(true); }} className="hover:text-accent">Demo Coach</button>
-          <button onClick={() => { setEmail('user@coachbellu.com'); setPassword('password'); setIsLogin(true); }} className="hover:text-accent">Demo Atleta</button>
-        </div>
       </motion.div>
     </div>
   );
@@ -213,6 +252,8 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
 const ResetPassword = () => {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [showPwd1, setShowPwd1] = useState(false);
+  const [showPwd2, setShowPwd2] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -252,13 +293,31 @@ const ResetPassword = () => {
           <p className="text-accent font-bold uppercase tracking-widest text-xs text-center">{message}</p>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
+            <div className="relative">
               <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 ml-1">Password</label>
-              <input type="password" className="input-field" value={password} onChange={e => setPassword(e.target.value)} required />
+              <div className="relative">
+                <input type={showPwd1 ? "text" : "password"} className="input-field pr-14" value={password} onChange={e => setPassword(e.target.value)} required />
+                <button 
+                  type="button"
+                  onClick={() => setShowPwd1(!showPwd1)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-zinc-600 hover:text-accent transition-all"
+                >
+                  {showPwd1 ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
             </div>
-            <div>
+            <div className="relative">
               <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 ml-1">Conferma Password</label>
-              <input type="password" className="input-field" value={confirm} onChange={e => setConfirm(e.target.value)} required />
+              <div className="relative">
+                <input type={showPwd2 ? "text" : "password"} className="input-field pr-14" value={confirm} onChange={e => setConfirm(e.target.value)} required />
+                <button 
+                  type="button"
+                  onClick={() => setShowPwd2(!showPwd2)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-zinc-600 hover:text-accent transition-all"
+                >
+                  {showPwd2 ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
             </div>
             {error && <p className="text-red-400 text-[10px] font-black uppercase tracking-widest text-center">{error}</p>}
             <button type="submit" disabled={loading} className="btn-primary w-full py-5">
@@ -343,8 +402,8 @@ const Chat = ({ currentUser, otherUser, onBack, theme }: { currentUser: User, ot
                 : (theme === 'light' ? 'bg-zinc-200 text-zinc-900 rounded-tl-none' : 'bg-zinc-800 text-white rounded-tl-none')
             }`}>
               <p className="text-sm font-bold">{m.content}</p>
-              <p className={`text-[8px] mt-1 font-black uppercase opacity-40 ${m.sender_id === currentUser.id ? 'text-black' : (theme === 'light' ? 'text-zinc-900' : 'text-white')}`}>
-                {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              <p className={`text-[10px] sm:text-[8px] mt-1 font-black uppercase opacity-40 ${m.sender_id === currentUser.id ? 'text-black' : (theme === 'light' ? 'text-zinc-900' : 'text-white')}`}>
+                {new Date(m.created_at).toLocaleDateString([], { day: '2-digit', month: '2-digit' })} • {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </p>
             </div>
           </div>
@@ -357,6 +416,7 @@ const Chat = ({ currentUser, otherUser, onBack, theme }: { currentUser: User, ot
           placeholder="Scrivi un messaggio..." 
           value={newMessage}
           onChange={e => setNewMessage(e.target.value)}
+          autoFocus
         />
         <button type="submit" disabled={loading} className="w-14 h-14 bg-accent rounded-2xl flex items-center justify-center text-black hover:scale-105 transition-all shadow-lg shadow-accent/20">
           <Send className="w-6 h-6" />
@@ -366,23 +426,26 @@ const Chat = ({ currentUser, otherUser, onBack, theme }: { currentUser: User, ot
   );
 };
 
-const Notifications = ({ coachId, onReply, onBack, theme }: { coachId: number, onReply: (userId: number) => void, onBack: () => void, theme?: 'dark' | 'light' }) => {
+const Notifications = ({ coachId, onReply, onBack, theme, fullView = false }: { coachId: number, onReply: (userId: number) => void, onBack: () => void, theme?: 'dark' | 'light', fullView?: boolean }) => {
   const [notifications, setNotifications] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch(`/api/notifications/${coachId}`)
+    const endpoint = fullView ? `/api/notifications/full/${coachId}` : `/api/notifications/${coachId}`;
+    fetch(endpoint)
       .then(res => res.json())
       .then(setNotifications);
-  }, [coachId]);
+  }, [coachId, fullView]);
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center gap-6">
-        <button onClick={onBack} className={`w-14 h-14 flex items-center justify-center border rounded-2xl hover:shadow-lg transition-all ${theme === 'light' ? 'bg-white border-zinc-200 hover:shadow-zinc-200' : 'bg-zinc-900 border-white/10 hover:shadow-accent/20'}`}>
-          <ArrowLeft className="w-6 h-6 text-accent" />
-        </button>
-        <h2 className={`text-4xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Notifiche</h2>
-      </div>
+    <div className="space-y-8 h-full">
+      {onBack && typeof onBack === 'function' && onBack.toString() !== '() => {}' && (
+        <div className="flex items-center gap-6">
+          <button onClick={onBack} className={`w-14 h-14 flex items-center justify-center border rounded-2xl hover:shadow-lg transition-all ${theme === 'light' ? 'bg-white border-zinc-200 hover:shadow-zinc-200' : 'bg-zinc-900 border-white/10 hover:shadow-accent/20'}`}>
+            <ArrowLeft className={`w-6 h-6 ${theme === 'dark' ? 'text-accent' : 'text-zinc-900'}`} />
+          </button>
+          <h2 className={`text-4xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Notifiche</h2>
+        </div>
+      )}
       <div className="grid gap-4">
         {notifications.length === 0 ? (
           <p className="text-zinc-500 font-bold uppercase tracking-widest text-xs text-center py-20">Nessuna nuova notifica</p>
@@ -393,14 +456,20 @@ const Notifications = ({ coachId, onReply, onBack, theme }: { coachId: number, o
                 <div className="w-12 h-12 bg-accent/10 rounded-2xl flex items-center justify-center">
                   <Bell className="w-6 h-6 text-accent" />
                 </div>
-                <div>
+                <div className="flex-1">
                   <p className={`font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Messaggio da {n.sender_name}</p>
                   <p className="text-zinc-500 text-xs font-bold line-clamp-1">"{n.content}"</p>
+                  {fullView && (
+                    <p className="text-[10px] font-black text-accent uppercase tracking-widest mt-1">
+                      {new Date(n.created_at).toLocaleDateString()} • {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  )}
                 </div>
               </div>
               <button 
                 onClick={() => onReply(n.sender_id)}
-                className="bg-accent text-black px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white transition-all"
+                className="bg-accent text-black px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white transition-all transition-colors"
+                title="Rispondi"
               >
                 Rispondi
               </button>
@@ -522,9 +591,8 @@ const ExerciseLibrary = ({ exercises, onUpdate }: { exercises: Exercise[], onUpd
         </div>
         <div className="flex flex-col md:flex-row gap-4 flex-1">
           <div className="relative flex-1">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
             <input 
-              className="w-full py-4 pl-12 pr-4 bg-white border border-zinc-100 rounded-2xl text-xs font-bold uppercase tracking-widest outline-none focus:border-accent transition-all"
+              className="w-full py-4 pl-8 pr-4 bg-white border border-zinc-100 rounded-2xl text-xs font-bold uppercase tracking-widest outline-none focus:border-accent transition-all"
               placeholder="Cerca per nome o gruppo muscolare..."
               value={libSearch}
               onChange={e => setLibSearch(e.target.value)}
@@ -631,7 +699,7 @@ const ExerciseLibrary = ({ exercises, onUpdate }: { exercises: Exercise[], onUpd
 
 const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPlan[], exercises: Exercise[], onUpdate: () => void, theme?: 'dark' | 'light' }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
+  const [isCreating, setIsCreating] = useState<boolean | ModelPlan>(false);
   const [viewingModel, setViewingModel] = useState<ModelPlan | null>(null);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
@@ -639,6 +707,26 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
   const [exerciseSearch, setExerciseSearch] = useState('');
   const [previewMode, setPreviewMode] = useState(false);
   const [expandedDays, setExpandedDays] = useState<string[]>(['Giorno A']);
+
+  // Effect to populate form when editing
+  useEffect(() => {
+    if (typeof isCreating === 'object' && isCreating !== null) {
+      setNewName(isCreating.name);
+      setNewDesc(isCreating.description || '');
+      // Fetch items if they are not already in the object
+      if (isCreating.items) {
+        setModelItems(isCreating.items);
+      } else {
+        fetch(`/api/models/${isCreating.id}/items`)
+          .then(res => res.json())
+          .then(setModelItems);
+      }
+    } else {
+      setNewName('');
+      setNewDesc('');
+      setModelItems([]);
+    }
+  }, [isCreating]);
 
   const filteredModels = useMemo(() => {
     const s = searchTerm.toLowerCase();
@@ -653,8 +741,12 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
 
   const handleSave = async () => {
     if (!newName) return alert('Inserisci il nome del modello');
-    await fetch('/api/models', {
-      method: 'POST',
+    const isEditing = typeof isCreating === 'object';
+    const url = isEditing ? `/api/models/${(isCreating as ModelPlan).id}` : '/api/models';
+    const method = isEditing ? 'PATCH' : 'POST';
+
+    await fetch(url, {
+      method: method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newName, description: newDesc, items: modelItems })
     });
@@ -720,8 +812,12 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
       <div className="space-y-12">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
           <div>
-            <h2 className={`text-4xl font-display font-black italic uppercase tracking-tighter leading-none mb-2 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Editor Modello</h2>
-            <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">Stai creando un modello master riutilizzabile</p>
+            <h2 className={`text-4xl font-display font-black italic uppercase tracking-tighter leading-none mb-2 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>
+              {typeof isCreating === 'object' ? 'Modifica Modello' : 'Editor Modello'}
+            </h2>
+            <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">
+              {typeof isCreating === 'object' ? 'Stai modificando un modello esistente' : 'Stai creando un modello master riutilizzabile'}
+            </p>
           </div>
           <div className="flex gap-4">
             <button onClick={() => setIsCreating(false)} className={`px-6 py-3 font-black uppercase tracking-widest text-xs transition-all ${theme === 'light' ? 'text-zinc-500 hover:text-zinc-900' : 'text-zinc-500 hover:text-white'}`}>Annulla</button>
@@ -761,13 +857,11 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
 
         <div className="space-y-8">
           <div className="relative">
-            <div className="absolute inset-y-0 left-8 flex items-center pointer-events-none">
-              <Search className="w-6 h-6 text-accent" />
-            </div>
+            {/* Search Icon Removed */}
             <input
               type="text"
               placeholder="Cerca esercizio da aggiungere al modello..."
-              className={`input-field pl-20 py-8 text-xl font-bold rounded-[2.5rem] transition-all ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900' : 'bg-zinc-900/80 border-white/5 text-white focus:bg-zinc-900'}`}
+              className={`input-field pl-8 py-8 text-xl font-bold rounded-[2.5rem] transition-all ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900' : 'bg-zinc-900/80 border-white/5 text-white focus:bg-zinc-900'}`}
               value={exerciseSearch}
               onChange={(e) => setExerciseSearch(e.target.value)}
             />
@@ -990,13 +1084,18 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
 
   return (
     <div className="space-y-12">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+      <div className="flex justify-between items-center gap-4">
         <div>
-          <h2 className={`text-6xl font-display font-black italic uppercase tracking-tighter leading-none mb-3 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Modelli Master</h2>
+          <h2 className={`text-4xl sm:text-6xl font-display font-black italic uppercase tracking-tighter leading-none mb-3 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Modelli Master</h2>
           <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">Libreria Schede Riutilizzabili</p>
         </div>
-        <button onClick={() => setIsCreating(true)} className="bg-blue-600 text-white px-10 py-5 rounded-[2rem] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-xl shadow-blue-600/30 flex items-center gap-3">
-          <Plus className="w-6 h-6" /> Crea Nuovo Modello
+        <button 
+          onClick={() => setIsCreating(true)} 
+          className="bg-blue-600 text-white px-6 sm:px-10 py-3 sm:py-5 rounded-2xl sm:rounded-[2rem] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-xl shadow-blue-600/30 flex items-center gap-3"
+          title="Crea Nuovo Modello"
+        >
+          <Plus className="w-5 h-5 sm:w-6 sm:h-6" />
+          <span className="hidden sm:inline">Crea Nuovo Modello</span>
         </button>
       </div>
       <div className="relative">
@@ -1007,41 +1106,48 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
           onChange={e => setSearchTerm(e.target.value)} 
         />
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {filteredModels.map(m => (
           <motion.div 
             key={m.id}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className={`glass p-10 rounded-[4rem] border relative group transition-all duration-500 hover:shadow-2xl ${theme === 'light' ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-white/5 hover:border-accent/20'}`}
+            className={`glass p-6 rounded-[2.5rem] border relative group transition-all duration-500 hover:shadow-2xl ${theme === 'light' ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-white/5 hover:border-accent/20'}`}
           >
-            <div className="mb-10">
-              <h3 className="text-4xl font-display font-black italic uppercase tracking-tighter text-blue-500 leading-none mb-4 group-hover:text-accent transition-colors">{m.name}</h3>
-              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+            <div className="mb-6">
+              <h3 className="text-2xl font-display font-black italic uppercase tracking-tighter text-blue-500 leading-none mb-2 group-hover:text-accent transition-colors">{m.name}</h3>
+              <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
                 <Clock className="w-3 h-3"/> {new Date(m.created_at).toLocaleDateString()}
               </p>
             </div>
-            <p className="text-zinc-500 font-bold italic text-lg leading-relaxed line-clamp-3 mb-12">{m.description || 'Nessuna descrizione specificata per questo modello master.'}</p>
-            <div className="flex justify-between items-center pt-8 border-t border-white/5">
-              <div className="flex items-center gap-4">
+            <p className="text-zinc-500 font-bold italic text-sm leading-relaxed line-clamp-2 mb-8">{m.description || 'Nessuna descrizione specificata per questo modello master.'}</p>
+            <div className="flex justify-between items-center pt-5 border-t border-white/5">
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setIsCreating(m)}
+                  className="w-10 h-10 rounded-xl bg-zinc-800 text-accent flex items-center justify-center hover:bg-accent hover:text-black transition-all shadow-lg"
+                  title="Modifica Modello"
+                >
+                  <Edit3 className="w-5 h-5" />
+                </button>
                 <button 
                   onClick={() => setViewingModel(m)}
-                  className="w-12 h-12 rounded-2xl bg-zinc-800 text-accent flex items-center justify-center hover:bg-accent hover:text-black transition-all shadow-lg"
+                  className="w-10 h-10 rounded-xl bg-zinc-800 text-accent flex items-center justify-center hover:bg-accent hover:text-black transition-all shadow-lg"
                   title="Visualizza Modello"
                 >
-                  <Eye className="w-6 h-6" />
+                  <Eye className="w-5 h-5" />
                 </button>
               </div>
               <button 
                 onClick={(e) => { e.stopPropagation(); handleDelete(m.id); }} 
-                className="p-3 text-zinc-600 hover:text-red-500 transition-colors"
+                className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
                 title="Elimina Modello"
               >
-                <Trash2 className="w-5 h-5" />
+                <Trash2 className="w-4 h-4" />
               </button>
             </div>
-            <div className="absolute top-6 right-6 px-4 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
-              <span className="text-[10px] font-black text-blue-500 uppercase">Master</span>
+            <div className="absolute top-4 right-4 px-3 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20">
+              <span className="text-[8px] font-black text-blue-500 uppercase">Master</span>
             </div>
           </motion.div>
         ))}
@@ -1105,7 +1211,7 @@ const LoadModelView = ({ models, onSelect, onBack, theme }: { models: ModelPlan[
   );
 };
 
-const PlanHistory = ({ userId, clientName, onLoadPlan, onBack }: { userId: number, clientName: string, onLoadPlan: (items: PlanItem[]) => void, onBack: () => void }) => {
+const PlanHistory = ({ userId, clientName, onLoadPlan, onBack, theme }: { userId: number, clientName: string, onLoadPlan: (items: PlanItem[]) => void, onBack: () => void, theme?: 'dark' | 'light' }) => {
   const [history, setHistory] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -1133,17 +1239,17 @@ const PlanHistory = ({ userId, clientName, onLoadPlan, onBack }: { userId: numbe
   return (
     <div className="space-y-12">
       <div className="flex items-center gap-6">
-        <button onClick={onBack} className="w-14 h-14 flex items-center justify-center bg-white border border-zinc-200 rounded-2xl hover:shadow-lg transition-all">
-          <ArrowLeft className="w-6 h-6" />
+        <button onClick={onBack} className={`w-14 h-14 flex items-center justify-center border rounded-2xl hover:shadow-lg transition-all ${theme === 'light' ? 'bg-white border-zinc-200 shadow-zinc-200' : 'bg-zinc-900 border-white/10 shadow-accent/20'}`}>
+          <ArrowLeft className="w-6 h-6 text-accent" />
         </button>
         <div>
-          <h2 className="text-3xl font-display font-black italic uppercase tracking-tighter">Storico Schede: {clientName}</h2>
+          <h2 className={`text-3xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Storico Schede: {clientName}</h2>
           <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">Gestisci le programmazioni passate</p>
         </div>
       </div>
 
       {history.length === 0 ? (
-        <p className="text-zinc-500 font-medium">Nessuna scheda precedente trovata.</p>
+        <p className={`font-medium ${theme === 'light' ? 'text-zinc-500' : 'text-zinc-400'}`}>Nessuna scheda precedente trovata.</p>
       ) : (
         <div className="space-y-20">
           {history.map((plan) => {
@@ -1155,9 +1261,9 @@ const PlanHistory = ({ userId, clientName, onLoadPlan, onBack }: { userId: numbe
             }, {} as Record<string, PlanItem[]>);
 
             return (
-              <div key={plan.id} className="bg-white p-10 rounded-[3rem] border border-zinc-100 shadow-xl relative group">
+              <div key={plan.id} className={`p-10 rounded-[3rem] border shadow-xl relative group ${theme === 'light' ? 'bg-white border-zinc-100' : 'bg-zinc-900 border-white/10'}`}>
                 <div className="absolute top-0 right-10 -translate-y-1/2 flex gap-2">
-                  <div className="bg-zinc-900 text-white px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest">
+                  <div className="bg-zinc-900 text-white px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10">
                     {new Date(plan.created_at).toLocaleDateString()}
                   </div>
                   <button 
@@ -1180,17 +1286,17 @@ const PlanHistory = ({ userId, clientName, onLoadPlan, onBack }: { userId: numbe
                       <h4 className="text-xl font-display font-black italic uppercase tracking-tighter text-blue-600">{day}</h4>
                       <div className="grid gap-4">
                         {items.map((item, i) => (
-                          <div key={i} className="flex flex-col gap-1 p-4 rounded-2xl bg-zinc-50/50 border border-zinc-100">
+                          <div key={i} className={`flex flex-col gap-1 p-4 rounded-2xl border ${theme === 'light' ? 'bg-zinc-50/50 border-zinc-100' : 'bg-black/40 border-white/5'}`}>
                             <div className="flex items-center justify-between">
-                              <p className="font-medium text-zinc-900">
+                              <p className={`font-medium ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-300'}`}>
                                 <strong className="uppercase italic tracking-tight">{item.exercise_name}</strong>: {item.sets} x {item.reps}
                               </p>
                               {item.pt_notes && <span className="text-xs text-zinc-400 italic">Note PT: {item.pt_notes}</span>}
                             </div>
                             {item.user_notes && (
-                              <div className="mt-2 p-3 bg-blue-50 rounded-xl border border-blue-100">
+                              <div className={`mt-2 p-3 rounded-xl border ${theme === 'light' ? 'bg-blue-50 border-blue-100' : 'bg-blue-900/20 border-blue-500/20'}`}>
                                 <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1">Feedback Atleta:</p>
-                                <p className="text-xs text-zinc-600 italic">"{item.user_notes}"</p>
+                                <p className={`text-xs italic ${theme === 'light' ? 'text-zinc-600' : 'text-zinc-400'}`}>"{item.user_notes}"</p>
                               </div>
                             )}
                           </div>
@@ -1208,7 +1314,7 @@ const PlanHistory = ({ userId, clientName, onLoadPlan, onBack }: { userId: numbe
   );
 };
 
-const PlanPreview = ({ items, clientName, onBack }: { items: PlanItem[], clientName: string, onBack: () => void }) => {
+const PlanPreview = ({ items, clientName, onBack, theme }: { items: PlanItem[], clientName: string, onBack: () => void, theme?: 'dark' | 'light' }) => {
   const grouped = useMemo(() => {
     return items.reduce((acc, item) => {
       const day = item.day || 'Giorno A';
@@ -1270,11 +1376,11 @@ const PlanPreview = ({ items, clientName, onBack }: { items: PlanItem[], clientN
     <div className="space-y-12 max-w-4xl mx-auto">
       <div className="flex items-center justify-between gap-6">
         <div className="flex items-center gap-6">
-          <button onClick={onBack} className="w-14 h-14 flex items-center justify-center bg-white border border-zinc-200 rounded-2xl hover:shadow-lg transition-all">
-            <ArrowLeft className="w-6 h-6" />
+          <button onClick={onBack} className={`w-14 h-14 flex items-center justify-center border rounded-2xl hover:shadow-lg transition-all ${theme === 'light' ? 'bg-white border-zinc-200 shadow-zinc-200' : 'bg-zinc-900 border-white/10 shadow-accent/20'}`}>
+            <ArrowLeft className="w-6 h-6 text-accent" />
           </button>
           <div>
-            <h2 className="text-4xl font-display font-black italic uppercase tracking-tighter leading-none mb-2">Anteprima Atleta</h2>
+            <h2 className={`text-4xl font-display font-black italic uppercase tracking-tighter leading-none mb-2 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Anteprima Atleta</h2>
             <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">Visualizzazione per: {clientName}</p>
           </div>
         </div>
@@ -1286,10 +1392,10 @@ const PlanPreview = ({ items, clientName, onBack }: { items: PlanItem[], clientN
         </button>
       </div>
       
-      <div className="bg-white p-12 rounded-[3rem] border border-zinc-100 shadow-2xl space-y-12">
-        <div className="flex justify-between items-start border-b border-zinc-100 pb-10">
+      <div className={`p-12 rounded-[3rem] border shadow-2xl space-y-12 ${theme === 'light' ? 'bg-white border-zinc-100' : 'bg-zinc-900 border-white/10'}`}>
+        <div className={`flex justify-between items-start border-b pb-10 ${theme === 'light' ? 'border-zinc-100' : 'border-white/5'}`}>
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 bg-zinc-900 rounded-2xl flex items-center justify-center overflow-hidden">
+            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center overflow-hidden ${theme === 'light' ? 'bg-zinc-900' : 'bg-zinc-800'}`}>
               <img 
                 src="https://i.imgur.com/Qbox1fT.jpeg" 
                 alt="Logo" 
@@ -1298,7 +1404,7 @@ const PlanPreview = ({ items, clientName, onBack }: { items: PlanItem[], clientN
               />
             </div>
             <div>
-              <h3 className="text-2xl font-display font-black italic uppercase tracking-tighter leading-none">Pietro Cassago</h3>
+              <h3 className={`text-2xl font-display font-black italic uppercase tracking-tighter leading-none ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Pietro Cassago</h3>
               <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mt-1">Personal Trainer</p>
             </div>
           </div>
@@ -1311,13 +1417,15 @@ const PlanPreview = ({ items, clientName, onBack }: { items: PlanItem[], clientN
         <div className="space-y-12">
           {(Object.entries(grouped) as [string, PlanItem[]][]).sort().map(([day, dayItems]) => (
             <div key={day} className="space-y-6">
-              <h4 className="text-3xl font-display font-black italic uppercase tracking-tighter text-zinc-900 border-l-4 border-blue-600 pl-4">{day}</h4>
+              <h4 className={`text-3xl font-display font-black italic uppercase tracking-tighter border-l-4 border-blue-600 pl-4 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{day}</h4>
               <ul className="space-y-4 ml-8">
                 {dayItems.map((item, idx) => (
-                  <li key={idx} className="flex items-start gap-3 text-lg font-medium text-zinc-700">
+                  <li key={idx} className="flex items-start gap-3 text-lg font-medium">
                     <span className="text-blue-600 font-black mt-1">•</span>
                     <span>
-                      <strong className="text-zinc-900 uppercase italic tracking-tight">{item.exercise_name}</strong> {item.sets} x {item.reps} {item.pt_notes && <span className="text-zinc-400 italic">({item.pt_notes})</span>}
+                      <strong className={`uppercase italic tracking-tight ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{item.exercise_name}</strong> 
+                      <span className={`ml-2 ${theme === 'light' ? 'text-zinc-700' : 'text-zinc-400'}`}>{item.sets} x {item.reps}</span> 
+                      {item.pt_notes && <span className="text-zinc-400 italic ml-2">({item.pt_notes})</span>}
                     </span>
                   </li>
                 ))}
@@ -1326,8 +1434,8 @@ const PlanPreview = ({ items, clientName, onBack }: { items: PlanItem[], clientN
           ))}
         </div>
 
-        <div className="pt-10 border-t border-zinc-100">
-          <h4 className="text-xl font-display font-black italic uppercase tracking-tighter mb-6">NOTA BENE:</h4>
+        <div className={`pt-10 border-t ${theme === 'light' ? 'border-zinc-100' : 'border-white/5'}`}>
+          <h4 className={`text-xl font-display font-black italic uppercase tracking-tighter mb-6 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>NOTA BENE:</h4>
           <ul className="space-y-3 text-sm font-medium text-zinc-500">
             <li className="flex gap-3"><span className="text-blue-600">•</span> 3 giorni x week A-B-C</li>
             <li className="flex gap-3"><span className="text-blue-600">•</span> La dicitura è serie x ripetizioni</li>
@@ -1347,6 +1455,7 @@ const SettingsView = ({ user, onBack, theme, settings: initialSettings, updateSe
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [successMessage, setSuccessMessage] = useState(false);
 
   const defaultSettings = {
     about_title: 'Pietro Cassago',
@@ -1356,16 +1465,18 @@ const SettingsView = ({ user, onBack, theme, settings: initialSettings, updateSe
     about_focus: 'Performance',
     about_standard: 'Elite',
     about_image: 'https://picsum.photos/seed/coachbellu/800/800',
+    about_image_enabled: true,
     about_font_family: 'Inter',
-    about_text_color: '#ffffff',
+    about_text_color_dark: '#ffffff',
+    about_text_color_light: '#000000',
     about_accent_color: '#2350D1',
     about_title_size: '6rem',
     about_desc_size: '1.125rem',
     about_box_size: 220,
     about_box_width: 100,
-    box1_enabled: true, box1_label: 'Specialty', box1_value: 'Calisthenics', box1_bg: '#2350D1', box1_color: '#ffffff',
-    box2_enabled: true, box2_label: 'Focus', box2_value: 'Performance', box2_bg: '#2350D1', box2_color: '#ffffff',
-    box3_enabled: true, box3_label: 'Quality', box3_value: 'Elite', box3_bg: '#2350D1', box3_color: '#ffffff',
+    box1_enabled: false, box1_label: 'Specialty', box1_value: 'Calisthenics', box1_bg: '#2350D1', box1_color: '#ffffff',
+    box2_enabled: false, box2_label: 'Focus', box2_value: 'Performance', box2_bg: '#2350D1', box2_color: '#ffffff',
+    box3_enabled: false, box3_label: 'Quality', box3_value: 'Elite', box3_bg: '#2350D1', box3_color: '#ffffff',
   };
 
   useEffect(() => {
@@ -1395,12 +1506,54 @@ const SettingsView = ({ user, onBack, theme, settings: initialSettings, updateSe
     });
 
     setSaving(false);
-    alert('Impostazioni salvate!');
+    
+    // Check if anything actually changed
+    const hasChanged = JSON.stringify(settings) !== JSON.stringify(initialSettings);
+    if (hasChanged) {
+      setSuccessMessage(true);
+      setTimeout(() => setSuccessMessage(false), 3000);
+    }
+    
+    // Update local state to reflect possible count changes
+    updateSettings(settings);
+  };
+
+  const addBox = () => {
+    // Find first available box index
+    for (let i = 1; i <= 8; i++) {
+      if (!settings[`box${i}_enabled`]) {
+        setSettings({
+          ...settings,
+          [`box${i}_enabled`]: true,
+          [`box${i}_label`]: 'Nuovo Box',
+          [`box${i}_value`]: 'Valore',
+          [`box${i}_bg`]: '#2350D1',
+          [`box${i}_color`]: '#ffffff',
+          [`box${i}_height`]: 220,
+          [`box${i}_width`]: 300,
+          [`box${i}_font_size`]: 30
+        });
+        break;
+      }
+    }
+  };
+
+  const deleteBox = (i: number) => {
+    if (!confirm(`Sei sicuro di voler eliminare il Box ${i}?`)) return;
+    setSettings({
+      ...settings,
+      [`box${i}_enabled`]: false
+    });
   };
 
   const handleReset = () => {
     if (confirm('Ripristinare le impostazioni predefinite?')) {
+      const hasChanged = JSON.stringify(defaultSettings) !== JSON.stringify(settings);
       setSettings(defaultSettings);
+      if (hasChanged) {
+        setSuccessMessage(true);
+        setTimeout(() => setSuccessMessage(false), 3000);
+      }
     }
   };
 
@@ -1416,6 +1569,15 @@ const SettingsView = ({ user, onBack, theme, settings: initialSettings, updateSe
           <h2 className={`text-4xl font-display font-black italic uppercase tracking-tighter leading-none mb-2 ${theme === 'dark' ? 'text-white' : 'text-zinc-900'}`}>Impostazioni Sito</h2>
           <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">Personalizza la tua pagina "Chi Sono"</p>
         </div>
+        {successMessage && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] bg-green-500 text-white px-8 py-4 rounded-[2rem] text-[10px] sm:text-xs font-black uppercase tracking-widest shadow-2xl shadow-green-500/40 flex items-center gap-3 border border-white/20"
+          >
+            <CheckCircle2 className="w-5 h-5" /> Modifiche salvate
+          </motion.div>
+        )}
       </div>
 
       <form onSubmit={handleSave} className="glass p-10 rounded-[3rem] space-y-8">
@@ -1455,6 +1617,15 @@ const SettingsView = ({ user, onBack, theme, settings: initialSettings, updateSe
                 onChange={e => setSettings({...settings, about_description: e.target.value})}
               />
             </div>
+            <div className="flex items-center gap-4 py-6 px-8 rounded-3xl bg-accent/5 border border-accent/20">
+              <input 
+                type="checkbox" 
+                checked={String(settings.about_image_enabled) === 'true'}
+                onChange={e => setSettings({...settings, about_image_enabled: e.target.checked})}
+                className="w-6 h-6 rounded-xl appearance-none border-2 border-accent/20 checked:bg-accent checked:border-accent transition-all cursor-pointer relative after:content-[''] after:absolute after:inset-0 after:flex after:items-center after:justify-center after:text-black after:font-black after:text-[10px] after:checked:content-['✓']"
+              />
+              <label className={`text-[10px] font-black uppercase tracking-widest ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-400'}`}>Abilita Immagine Profilo</label>
+            </div>
           </div>
         </div>
 
@@ -1465,49 +1636,49 @@ const SettingsView = ({ user, onBack, theme, settings: initialSettings, updateSe
             <div>
               <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-3 block ml-1">Altezza Box (px)</label>
               <input 
-                type="range" min="150" max="500" step="10"
+                type="range" min="100" max="600" step="10"
                 className="w-full h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-accent"
                 value={settings.about_box_size || 220}
                 onChange={e => setSettings({...settings, about_box_size: parseInt(e.target.value)})}
               />
               <span className="text-[10px] font-bold text-accent mt-2 block ml-1">{settings.about_box_size || 220}px</span>
             </div>
-            <div>
-              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-3 block ml-1">Larghezza Box (%)</label>
-              <input 
-                type="range" min="50" max="100" step="5"
-                className="w-full h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-accent"
-                value={settings.about_box_width || 100}
-                onChange={e => setSettings({...settings, about_box_width: parseInt(e.target.value)})}
-              />
-              <span className="text-[10px] font-bold text-accent mt-2 block ml-1">{settings.about_box_width || 100}%</span>
-            </div>
           </div>
         </div>
 
         {/* Detailing Boxes Customization */}
-        <div className="pt-10 border-t border-white/5 space-y-10">
-          <h3 className={`text-2xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Box Informativi</h3>
+          <div className="flex justify-between items-center mb-6">
+            <h3 className={`text-2xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Box Informativi</h3>
+            <button 
+              type="button"
+              onClick={addBox}
+              className="px-6 py-3 bg-accent text-black rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-white transition-all shadow-lg shadow-accent/20 flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" /> Aggiungi Box
+            </button>
+          </div>
           
-          {[1, 2, 3].map(i => (
-            <div key={i} className={`p-8 rounded-3xl border transition-all ${settings[`box${i}_enabled`] ? (theme === 'light' ? 'border-accent/30 bg-accent/5' : 'border-accent/30 bg-accent/5') : (theme === 'light' ? 'border-zinc-200 bg-transparent opacity-60' : 'border-white/5 bg-transparent opacity-60')}`}>
-              <div className="flex items-center justify-between mb-8">
-                <div className="flex items-center gap-4">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black ${settings[`box${i}_enabled`] ? 'bg-accent text-black' : 'bg-zinc-800 text-zinc-500'}`}>
-                    {i}
+          {[1, 2, 3, 4, 5, 6, 7, 8].map(i => {
+            if (!settings[`box${i}_enabled`]) return null;
+            return (
+              <div key={i} className={`p-8 rounded-3xl border transition-all border-accent/30 bg-accent/5`}>
+                <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black bg-accent text-black">
+                      {i}
+                    </div>
+                    <h4 className={`text-lg font-black uppercase tracking-widest ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Box {i}</h4>
                   </div>
-                  <h4 className={`text-lg font-black uppercase tracking-widest ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Box {i === 1 ? 'Sinistro' : i === 2 ? 'Centrale' : 'Destro'}</h4>
+                  <button 
+                    type="button"
+                    onClick={() => deleteBox(i)}
+                    className="p-3 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl hover:bg-red-500 hover:text-white transition-all"
+                    title="Elimina Box"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
                 </div>
-                <button 
-                  type="button"
-                  onClick={() => setSettings({...settings, [`box${i}_enabled`]: !settings[`box${i}_enabled`]}) }
-                  className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${settings[`box${i}_enabled`] ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'bg-accent text-black'}`}
-                >
-                  {settings[`box${i}_enabled`] ? 'Disabilita' : 'Abilita'}
-                </button>
-              </div>
 
-              {settings[`box${i}_enabled`] && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   <div>
                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1 block ml-1">Etichetta (es. Specialty)</label>
@@ -1516,6 +1687,22 @@ const SettingsView = ({ user, onBack, theme, settings: initialSettings, updateSe
                   <div>
                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1 block ml-1">Valore (es. Calisthenics)</label>
                     <input className="input-field" value={settings[`box${i}_value`] || ''} onChange={e => setSettings({...settings, [`box${i}_value`]: e.target.value})} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1 block ml-1">Altezza (px)</label>
+                      <input type="number" className="input-field" value={settings[`box${i}_height`] || 220} onChange={e => setSettings({...settings, [`box${i}_height`]: parseInt(e.target.value)})} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1 block ml-1">Larghezza (px)</label>
+                      <input type="number" className="input-field" value={settings[`box${i}_width`] || 300} onChange={e => setSettings({...settings, [`box${i}_width`]: parseInt(e.target.value)})} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1 block ml-1">Testo (px)</label>
+                      <input type="number" className="input-field" value={settings[`box${i}_font_size`] || 30} onChange={e => setSettings({...settings, [`box${i}_font_size`]: parseInt(e.target.value)})} />
+                    </div>
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1 block ml-1">Colore Sfondo</label>
@@ -1526,10 +1713,9 @@ const SettingsView = ({ user, onBack, theme, settings: initialSettings, updateSe
                     <input type="color" className="w-full h-12 rounded-xl bg-zinc-900 border border-white/10" value={settings[`box${i}_color`] || '#ffffff'} onChange={e => setSettings({...settings, [`box${i}_color`]: e.target.value})} />
                   </div>
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
+              </div>
+            );
+          })}
 
         <div className="pt-10 border-t border-white/5 space-y-8">
           <h3 className="text-2xl font-display font-black italic uppercase tracking-tighter text-white">Stile & Tipografia</h3>
@@ -1548,12 +1734,21 @@ const SettingsView = ({ user, onBack, theme, settings: initialSettings, updateSe
               </select>
             </div>
             <div>
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1 block ml-1">Colore Testo</label>
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1 block ml-1">Testo Dark Mode</label>
               <input 
                 type="color" 
                 className="w-full h-12 rounded-xl bg-zinc-900 border border-white/10"
-                value={settings.about_text_color || '#ffffff'}
-                onChange={e => setSettings({...settings, about_text_color: e.target.value})}
+                value={settings.about_text_color_dark || '#ffffff'}
+                onChange={e => setSettings({...settings, about_text_color_dark: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1 block ml-1">Testo Light Mode</label>
+              <input 
+                type="color" 
+                className="w-full h-12 rounded-xl bg-zinc-900 border border-white/10"
+                value={settings.about_text_color_light || '#000000'}
+                onChange={e => setSettings({...settings, about_text_color_light: e.target.value})}
               />
             </div>
             <div>
@@ -1622,13 +1817,13 @@ const SettingsView = ({ user, onBack, theme, settings: initialSettings, updateSe
   );
 };
 
-const PTHome = ({ user, theme }: { user: User, theme: 'dark' | 'light' }) => {
+const PTHome = ({ user, theme, onAthleteClick, onNotificationsClick }: { user: User, theme: 'dark' | 'light', onAthleteClick: (client: User) => void, onNotificationsClick: () => void }) => {
   const [view, setView] = useState<'home' | 'chat'>('home');
   const [chatUser, setChatUser] = useState<User | null>(null);
   const [clients, setClients] = useState<User[]>([]);
 
   useEffect(() => {
-    fetch('/api/users').then(res => res.json()).then(setClients);
+    fetch('/api/users').then(res => res.json()).then(data => setClients(Array.isArray(data) ? data : []));
   }, []);
 
   if (view === 'chat' && chatUser) {
@@ -1650,41 +1845,39 @@ const PTHome = ({ user, theme }: { user: User, theme: 'dark' | 'light' }) => {
       const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
       return dateB - dateA || b.id - a.id;
     })
-    .slice(0, 2);
+    .slice(0, 5);
 
   return (
     <div className={`max-w-6xl mx-auto space-y-12 transition-all duration-500`}>
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-        <div>
-          <h2 className={`text-6xl font-display font-black italic uppercase tracking-tighter leading-none transition-colors duration-500 ${theme === 'dark' ? 'text-white' : 'text-zinc-900'}`}>COACH HOME</h2>
-          <p className="text-zinc-500 font-bold uppercase tracking-widest text-xs mt-3">Benvenuto, {user.name} 👋</p>
-        </div>
-        <div className="flex gap-4">
-          <div className="p-6 bg-accent/10 border border-accent/20 rounded-[2rem] text-center min-w-[140px]">
-            <p className="text-[10px] font-black uppercase tracking-widest text-accent mb-1">Atleti Totali</p>
-            <p className="text-3xl font-display font-black italic">{clients.length}</p>
-          </div>
-        </div>
+      <div className="flex flex-col md:flex-row justify-end items-start md:items-center gap-6">
+        {/* COACH HOME and Benvenuto removed */}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-        <div className="lg:col-span-2 space-y-10">
+        <div className="lg:col-span-3 space-y-10">
           <section className="space-y-6">
             <h3 className="text-xs font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center gap-3">
               <TrendingUp className="w-4 h-4" /> Ultimi Atleti Inseriti
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {recentAthletes.map(athlete => (
-                <div key={athlete.id} className={`glass p-8 rounded-[2.5rem] flex items-center gap-6 group hover:shadow-2xl transition-all border-white/5 ${theme === 'light' ? 'bg-white border-zinc-200 hover:shadow-zinc-200' : ''}`}>
-                  <div className="w-16 h-16 rounded-[1.5rem] bg-accent text-black flex items-center justify-center font-black text-2xl italic">
-                    {athlete.name.charAt(0)}
-                  </div>
-                  <div>
-                    <h4 className={`text-2xl font-display font-black italic uppercase tracking-tighter leading-none mb-1 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{athlete.name}</h4>
-                    <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest line-clamp-1">{athlete.email}</p>
-                  </div>
-                </div>
-              ))}
+              {recentAthletes.map(athlete => {
+                const joinedDate = athlete.contract_start ? new Date(athlete.contract_start).toLocaleDateString() : 'N/D';
+                return (
+                  <button 
+                    key={athlete.id} 
+                    onClick={() => onAthleteClick(athlete)}
+                    className={`w-full text-left glass p-6 rounded-[2.5rem] flex items-center justify-between group hover:shadow-2xl transition-all border-white/5 ${theme === 'light' ? 'bg-white border-zinc-200 hover:shadow-zinc-200' : ''}`}
+                  >
+                    <div className="flex items-center gap-6">
+                      <div className={`w-14 h-14 rounded-[1.5rem] flex items-center justify-center font-black text-2xl italic shrink-0 ${theme === 'dark' ? 'bg-zinc-800 text-accent' : 'bg-zinc-100 text-zinc-900'}`}>
+                        {athlete.name.charAt(0)}
+                      </div>
+                      <h4 className={`text-xl font-display font-black italic uppercase tracking-tighter leading-none group-hover:text-accent transition-colors ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{athlete.name}</h4>
+                    </div>
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest whitespace-nowrap">Inserito il {joinedDate}</span>
+                  </button>
+                );
+              })}
             </div>
           </section>
 
@@ -1692,44 +1885,18 @@ const PTHome = ({ user, theme }: { user: User, theme: 'dark' | 'light' }) => {
             <h3 className="text-xs font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center gap-3">
               <AlertCircle className="w-4 h-4 text-red-500" /> Contratti in Scadenza (7gg)
             </h3>
-            <div className="space-y-4">
-              {expiringAthletes.length > 0 ? expiringAthletes.map(athlete => (
-                <div key={athlete.id} className="glass p-6 rounded-3xl flex items-center justify-between border-red-500/20 bg-red-500/5">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-red-500 text-white flex items-center justify-center">
-                      <Clock className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="font-black italic uppercase tracking-tighter text-lg leading-none">{athlete.name}</h4>
-                      <p className="text-[10px] font-bold text-red-400 uppercase tracking-widest">
-                        Scade il {new Date(athlete.contract_end!).toLocaleDateString()}
-                      </p>
-                    </div>
+            {expiringAthletes.length > 0 ? expiringAthletes.map(athlete => (
+                <div key={athlete.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0 grow">
+                  <div className="flex items-center gap-3">
+                    <Clock className={`w-4 h-4 ${theme === 'dark' ? 'text-accent' : 'text-zinc-900'}`} />
+                    <p className={`font-black uppercase tracking-widest text-[10px] ${theme === 'dark' ? 'text-white' : 'text-zinc-900'}`}>{athlete.name}</p>
                   </div>
-                  <button className="text-[10px] font-black uppercase tracking-widest px-4 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all">Rinnova</button>
+                  <p className="text-red-500 text-[10px] font-black uppercase tracking-widest">Scade in {getDaysRemaining(athlete.contract_end)} giorni</p>
                 </div>
               )) : (
-                <div className="p-8 text-center glass rounded-3xl border-white/5">
-                  <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">Nessun contratto in scadenza imminente.</p>
-                </div>
+                <p className="text-zinc-500 font-bold uppercase tracking-widest text-[8px] italic">Nessun contratto in scadenza.</p>
               )}
-            </div>
           </section>
-        </div>
-
-        <div className="lg:col-span-1">
-          <Notifications 
-            coachId={user.id} 
-            onBack={() => {}} 
-            theme={theme} 
-            onReply={(userId) => {
-              const client = clients.find(c => c.id === userId);
-              if (client) {
-                setChatUser(client);
-                setView('chat');
-              }
-            }} 
-          />
         </div>
       </div>
     </div>
@@ -1737,8 +1904,21 @@ const PTHome = ({ user, theme }: { user: User, theme: 'dark' | 'light' }) => {
 };
 
 
-const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, refreshExercises, refreshModels }: { pt: User, theme: 'dark' | 'light', clients: User[], exercises: Exercise[], models: ModelPlan[], refreshClients: () => void, refreshExercises: () => void, refreshModels: () => void }) => {
-  const [selectedClient, setSelectedClient] = useState<User | null>(null);
+const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, refreshExercises, refreshModels, selectedClient, setSelectedClient, initialView, onViewHandled }: { 
+  pt: User, 
+  theme: 'dark' | 'light', 
+  clients: User[], 
+  exercises: Exercise[], 
+  models: ModelPlan[], 
+  refreshClients: () => void, 
+  refreshExercises: () => void, 
+  refreshModels: () => void,
+  selectedClient: User | null,
+  setSelectedClient: (c: User | null) => void,
+  initialView?: 'editor' | 'chat' | null,
+  onViewHandled?: () => void
+}) => {
+
   const [newPlanItems, setNewPlanItems] = useState<PlanItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -1746,6 +1926,67 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
   const [editingAthlete, setEditingAthlete] = useState<User | null>(null);
   const [chatUser, setChatUser] = useState<User | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const infoRef = React.useRef<HTMLDivElement>(null);
+  const [lastScrollPos, setLastScrollPos] = useState(() => {
+    const saved = sessionStorage.getItem('pt_athlete_list_scroll');
+    return saved ? parseInt(saved) : 0;
+  });
+
+  // Handle athlete click
+  const handleAthleteClick = (client: User) => {
+    if (window.innerWidth < 1024) {
+      sessionStorage.setItem('pt_athlete_list_scroll', window.scrollY.toString());
+      setLastScrollPos(window.scrollY);
+    }
+    setSelectedClient(client);
+    setView('bio');
+  };
+
+  // When going back from full info, we might want to restore scroll
+  const handleBackFromInfo = () => {
+    setSelectedClient(null);
+    setView('bio'); // Reset view state internally if needed, but the main thing is clear selectedClient
+    
+    if (window.innerWidth < 1024) {
+      setTimeout(() => {
+        window.scrollTo({ top: lastScrollPos, behavior: 'instant' });
+      }, 50);
+    }
+  };
+
+  useEffect(() => {
+    if (initialView && selectedClient) {
+      if (initialView === 'chat') {
+        setChatUser(selectedClient);
+        setView('chat');
+      } else {
+        setView(initialView as any);
+      }
+      onViewHandled?.();
+    }
+  }, [initialView, selectedClient, onViewHandled]);
+
+  const hasScrolledRef = React.useRef(false);
+
+  useEffect(() => {
+    if (selectedClient) {
+      const el = document.getElementById(`athlete-${selectedClient.id}`);
+      if (el) {
+        // Find scrollable container and check layout
+        const container = document.getElementById('athlete-list-container');
+        if (container) {
+          setTimeout(() => {
+            el.scrollIntoView({ 
+              behavior: hasScrolledRef.current ? 'smooth' : 'auto', 
+              block: hasScrolledRef.current ? 'nearest' : 'center'
+            });
+            hasScrolledRef.current = true;
+          }, 50);
+        }
+      }
+    }
+  }, [selectedClient, clients]);
+
   const [athleteSearch, setAthleteSearch] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'experience' | 'age'>('all');
   const [filterValue, setFilterValue] = useState('');
@@ -1816,14 +2057,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
     return result;
   }, [clients, athleteSearch, filterType, filterValue]);
 
-  const getDaysRemaining = (endDate?: string) => {
-    if (!endDate) return null;
-    const end = new Date(endDate);
-    const now = new Date();
-    const diffTime = end.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
-  };
+
 
   const addExercise = (ex: Exercise) => {
     setNewPlanItems([...newPlanItems, {
@@ -1866,13 +2100,19 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
   };
 
   if (view === 'chat' && chatUser) {
-    return <Chat currentUser={pt} otherUser={chatUser} onBack={() => setView('editor')} theme={theme} />;
+    return <Chat currentUser={pt} otherUser={chatUser} onBack={() => {
+      if (window.innerWidth < 1024 && !selectedClient) {
+        handleBackFromInfo();
+      } else {
+        setView('editor');
+      }
+    }} theme={theme} />;
   }
 
   if (view === 'library') {
     return (
       <div className="space-y-6">
-        <button onClick={() => setView('editor')} className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900 font-bold uppercase tracking-widest text-xs">
+        <button onClick={handleBackFromInfo} className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900 font-bold uppercase tracking-widest text-xs">
           <ArrowLeft className="w-4 h-4" /> Torna alla Dashboard
         </button>
         <ExerciseLibrary exercises={exercises} onUpdate={refreshExercises} />
@@ -1883,10 +2123,10 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
   if (view === 'models') {
     return (
       <div className="space-y-6">
-        <button onClick={() => setView('editor')} className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900 font-bold uppercase tracking-widest text-xs">
+        <button onClick={handleBackFromInfo} className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900 font-bold uppercase tracking-widest text-xs">
           <ArrowLeft className="w-4 h-4" /> Torna alla Dashboard
         </button>
-        <ModelsLibrary models={models} exercises={exercises} onUpdate={refreshModels} />
+        <ModelsLibrary models={models} exercises={exercises} onUpdate={refreshModels} theme={theme} />
       </div>
     );
   }
@@ -1907,7 +2147,8 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
           })));
           setView('editor');
         }}
-        onBack={() => setView('editor')} 
+        onBack={handleBackFromInfo} 
+        theme={theme}
       />
     );
   }
@@ -1929,37 +2170,42 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
           setNewPlanItems([...newPlanItems, ...cleanedItems]);
           setView('editor');
         }}
-        onBack={() => setView('editor')}
+        onBack={handleBackFromInfo}
       />
     );
   }
 
   if (view === 'preview' && selectedClient) {
-    return <PlanPreview items={newPlanItems} clientName={selectedClient.name} onBack={() => setView('editor')} />;
+    return <PlanPreview items={newPlanItems} clientName={selectedClient.name} onBack={handleBackFromInfo} theme={theme} />;
   }
 
+  // Mobile Detail View was previously rendered conditionally, now handled by CSS
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div className="flex items-stretch gap-8 h-full flex-1 min-h-0">
       {/* Client List */}
-      <div className="lg:col-span-1 space-y-6">
-        <div className="flex justify-between items-center">
-          <h2 className="text-xl font-display font-black italic uppercase tracking-tighter flex items-center gap-2">
-            <UserIcon className="w-5 h-5" /> Atleti
-          </h2>
-          <button 
-            onClick={() => setView('models')}
-            className="p-3 bg-white border border-zinc-200 rounded-2xl transition-all text-zinc-500 hover:text-zinc-900 hover:shadow-lg"
-            title="Gestisci Modelli"
-          >
-            <ClipboardList className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={() => setView('library')}
-            className="p-3 bg-white border border-zinc-200 rounded-2xl transition-all text-zinc-500 hover:text-zinc-900 hover:shadow-lg"
-            title="Gestisci Libreria"
-          >
-            <Dumbbell className="w-5 h-5" />
-          </button>
+      <div className={`w-full lg:w-1/3 flex flex-col h-full ${selectedClient ? 'hidden lg:flex' : 'flex'}`}>
+        <div className="flex-none space-y-6 mb-6">
+          <div className="flex justify-between items-center">
+            <h2 className={`text-xl font-display font-black italic uppercase tracking-tighter flex items-center gap-2 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>
+              <UserIcon className={`w-5 h-5 ${theme === 'dark' ? 'text-accent' : 'text-zinc-900'}`} /> ATLETI: {clients.length}
+            </h2>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => setView('models')}
+              className={`p-3 border rounded-2xl transition-all shadow-sm hover:shadow-lg ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900 hover:bg-zinc-50' : 'bg-zinc-900 border-white/5 text-accent hover:bg-zinc-800'}`}
+              title="Gestisci Modelli"
+            >
+              <ClipboardList className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={() => setView('library')}
+              className={`p-3 border rounded-2xl transition-all shadow-sm hover:shadow-lg ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900 hover:bg-zinc-50' : 'bg-zinc-900 border-white/5 text-accent hover:bg-zinc-800'}`}
+              title="Gestisci Libreria"
+            >
+              <Dumbbell className="w-5 h-5" />
+            </button>
+          </div>
         </div>
         
         {/* Athlete Search & Filter */}
@@ -1994,49 +2240,50 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
             )}
           </div>
         </div>
+        </div>
 
-        <div className="space-y-4">
+        <div className="flex-1 overflow-y-auto pr-2 -mr-2 pb-24 lg:pb-0 scroll-smooth space-y-4 scrollbar-hide" id="athlete-list-container">
           {filteredClients.map(client => {
             const daysLeft = getDaysRemaining(client.contract_end);
             return (
-              <div key={client.id} className="relative group">
-                <button
-                  onClick={() => { setSelectedClient(client); setView('bio'); }}
-                  className={`w-full text-left athlete-box flex items-center justify-between group border-2 transition-all duration-300 ${
+              <div key={client.id} id={`athlete-${client.id}`} className="relative group pt-athlete-box">
+                <div
+                  onClick={() => handleAthleteClick(client)}
+                  className={`w-full athlete-box flex items-center justify-between group border-2 transition-all duration-300 cursor-pointer p-4 sm:p-8 ${
                     selectedClient?.id === client.id 
-                      ? 'bg-accent text-black border-accent shadow-2xl shadow-accent/40 scale-[1.02]' 
-                      : (theme === 'dark' ? 'border-transparent bg-zinc-900/40' : 'border-transparent bg-white shadow-sm hover:shadow-md')
+                      ? (theme === 'dark' ? 'bg-accent text-white border-accent shadow-2xl shadow-accent/40 scale-[1.02]' : 'bg-white border-zinc-900 shadow-xl scale-[1.02]') 
+                      : (theme === 'dark' ? 'border-transparent bg-zinc-900/40 opacity-70 hover:opacity-100' : 'border-transparent bg-white shadow-sm hover:shadow-md')
                   }`}
                 >
-                  <div className="flex items-center gap-4">
-                    <div className="relative">
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xl transition-colors duration-500 ${
-                        selectedClient?.id === client.id 
-                          ? 'bg-black/10 text-black' 
-                          : (theme === 'dark' ? 'bg-zinc-800 text-accent' : 'bg-zinc-100 text-accent')
+                  <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+                    <div className="relative shrink-0">
+                      <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center font-black text-lg sm:text-xl transition-colors duration-500 ${
+                        theme === 'dark' 
+                          ? (selectedClient?.id === client.id ? 'bg-white text-accent shadow-xl' : 'bg-zinc-800 text-accent') 
+                          : (selectedClient?.id === client.id ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-900')
                       }`}>
                         {client.name.charAt(0)}
                       </div>
                       {daysLeft !== null && (
-                        <div className={`absolute -top-2 -right-2 px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-tighter shadow-md ${
-                          daysLeft <= 7 ? 'bg-red-500 text-white animate-pulse' : (theme === 'dark' ? 'bg-zinc-900 text-accent' : 'bg-white text-accent border border-zinc-100')
+                        <div className={`absolute -top-2 -right-2 px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-lg text-[7px] sm:text-[8px] font-black uppercase tracking-tighter shadow-md ${
+                          daysLeft <= 7 ? 'bg-red-500 text-white animate-pulse' : (theme === 'dark' ? 'bg-zinc-900 text-accent' : 'bg-white text-zinc-900 border border-zinc-200')
                         }`}>
                           {daysLeft}g
                         </div>
                       )}
                     </div>
-                    <div>
-                      <p className={`font-black text-xl italic uppercase tracking-tighter transition-colors duration-500 ${
-                        theme === 'dark' ? 'text-white' : (selectedClient?.id === client.id ? 'text-black' : 'text-zinc-900')
+                    <div className="min-w-0">
+                      <p className={`font-black text-lg sm:text-xl italic uppercase tracking-tighter truncate transition-colors duration-500 ${
+                        theme === 'dark' ? 'text-white' : 'text-zinc-900'
                       }`}>{client.name}</p>
-                      <div className="flex flex-col gap-1">
-                        <p className={`text-[10px] font-black uppercase tracking-widest transition-colors duration-500 ${
-                          selectedClient?.id === client.id ? 'text-black/60' : 'text-zinc-500'
+                      <div className="flex flex-col gap-0.5">
+                        <p className={`text-[9px] sm:text-[10px] font-black uppercase tracking-widest truncate transition-colors duration-500 ${
+                          theme === 'dark' ? (selectedClient?.id === client.id ? 'text-white/60' : 'text-zinc-500') : 'text-zinc-500'
                         }`}>
                           {client.email}
                         </p>
-                        <div className={`flex items-center gap-1 text-[10px] font-black uppercase tracking-widest transition-colors duration-500 ${
-                          selectedClient?.id === client.id ? 'text-black/80' : 'text-accent'
+                        <div className={`flex items-center gap-1 text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-colors duration-500 ${
+                          theme === 'dark' ? (selectedClient?.id === client.id ? 'text-white/80' : 'text-accent') : 'text-zinc-900'
                         }`}>
                           {client.age && <span>{client.age} anni</span>}
                           {client.age && client.experience_years && <span className="mx-1">•</span>}
@@ -2045,48 +2292,44 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-1 sm:gap-2 shrink-0">
                     <button 
                       onClick={(e) => { e.stopPropagation(); setChatUser(client); setView('chat'); }}
-                      className={`p-3 rounded-xl transition-all ${
-                        selectedClient?.id === client.id 
-                          ? 'text-black/40 hover:text-black hover:bg-black/10' 
-                          : 'text-zinc-500 hover:text-accent hover:bg-accent/5'
+                      className={`p-2 sm:p-2.5 rounded-xl transition-all ${
+                        theme === 'dark'
+                          ? (selectedClient?.id === client.id ? 'text-white hover:bg-black/10' : 'text-zinc-500 hover:text-accent hover:bg-accent/5')
+                          : (selectedClient?.id === client.id ? 'text-zinc-900 hover:bg-zinc-100' : 'text-zinc-500 hover:text-accent hover:bg-accent/5')
                       }`}
                       title="Apri Chat"
                     >
-                      <MessageSquare className="w-5 h-5" />
+                      <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
                     </button>
-                    <ChevronRight className={`w-6 h-6 transition-transform group-hover:translate-x-1 ${
-                      selectedClient?.id === client.id ? 'text-black' : (theme === 'dark' ? 'text-zinc-700' : 'text-zinc-300')
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setEditingAthlete(client); }}
+                      className={`p-2 sm:p-2.5 rounded-xl transition-all ${
+                        theme === 'dark'
+                          ? (selectedClient?.id === client.id ? 'text-white/60 hover:text-white hover:bg-black/10' : 'text-zinc-600 hover:text-blue-500 hover:bg-blue-500/5')
+                          : (selectedClient?.id === client.id ? 'text-zinc-900 hover:bg-zinc-100' : 'text-zinc-400 hover:text-blue-500 hover:bg-blue-500/5')
+                      }`}
+                      title="Modifica Info"
+                    >
+                      <Edit3 className="w-4 h-4 sm:w-5 sm:h-5" />
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleDeleteAthlete(client.id); }}
+                      className={`p-2 sm:p-2.5 rounded-xl transition-all ${
+                        theme === 'dark'
+                          ? (selectedClient?.id === client.id ? 'text-white/60 hover:text-red-300 hover:bg-red-500/10' : 'text-zinc-600 hover:text-red-500 hover:bg-red-500/5')
+                          : (selectedClient?.id === client.id ? 'text-red-600 hover:bg-red-50' : 'text-zinc-400 hover:text-red-600 hover:bg-red-50')
+                      }`}
+                      title="Elimina"
+                    >
+                      <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                    </button>
+                    <ChevronRight className={`w-5 h-5 sm:w-6 sm:h-6 shrink-0 transition-transform group-hover:translate-x-1 ${
+                      theme === 'dark' ? (selectedClient?.id === client.id ? 'text-white' : 'text-zinc-700') : 'text-zinc-400'
                     }`} />
                   </div>
-                </button>
-                
-                {/* Always visible edit/delete icons in top right corner of the card */}
-                <div className="absolute top-4 right-4 flex gap-1 z-10 transition-opacity">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setEditingAthlete(client); }}
-                    className={`p-2 rounded-lg transition-all ${
-                      selectedClient?.id === client.id 
-                        ? 'text-black/30 hover:text-black hover:bg-black/5' 
-                        : 'text-zinc-600 hover:text-blue-500 hover:bg-blue-500/5'
-                    }`}
-                    title="Modifica"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); handleDeleteAthlete(client.id); }}
-                    className={`p-2 rounded-lg transition-all ${
-                      selectedClient?.id === client.id 
-                        ? 'text-black/30 hover:text-red-700 hover:bg-red-500/10' 
-                        : 'text-zinc-600 hover:text-red-500 hover:bg-red-500/5'
-                    }`}
-                    title="Elimina"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
                 </div>
               </div>
             );
@@ -2197,7 +2440,13 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
       </div>
 
       {/* Plan Editor / Bio View */}
-      <div className="lg:col-span-2 space-y-6">
+      <div className={`w-full lg:w-2/3 flex flex-col h-full min-h-0 ${!selectedClient ? 'hidden lg:flex' : 'flex'}`} ref={infoRef}>
+        <div className="flex-1 overflow-y-auto pr-2 -mr-2 pb-24 lg:pb-0 scroll-smooth scrollbar-hide space-y-6 pt-1">
+        {selectedClient && (
+          <button onClick={handleBackFromInfo} className="lg:hidden flex items-center gap-2 text-zinc-500 hover:text-zinc-900 font-black uppercase tracking-widest text-[10px] sm:text-xs mb-6">
+            <ArrowLeft className="w-5 h-5" /> Torna alla Lista
+          </button>
+        )}
         {selectedClient ? (
           view === 'bio' ? (
             <motion.div 
@@ -2217,12 +2466,12 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                     </span>
                   </div>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-3 mt-4 sm:mt-0 order-last sm:order-none">
                   <button 
                     onClick={() => setView('editor')}
-                    className="btn-primary flex items-center gap-2"
+                    className="btn-primary flex items-center gap-2 py-3 px-6 sm:py-4 sm:px-8 text-[10px] sm:text-xs"
                   >
-                    <Plus className="w-5 h-5" /> Crea Scheda
+                    <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> Crea Scheda
                   </button>
                 </div>
               </div>
@@ -2243,34 +2492,19 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                       {selectedClient.bio || 'Nessuna bio inserita.'}
                     </div>
                   </div>
-                  
-                  {/* Credentials Section - Hidden by default as requested */}
-                  <div className="pt-4">
-                    <button 
-                      onClick={() => {
-                        const el = document.getElementById('credentials-box');
-                        if (el) el.classList.toggle('hidden');
-                      }}
-                      className="text-[10px] font-black text-accent uppercase tracking-widest hover:underline flex items-center gap-2"
-                    >
-                      <Key className="w-3 h-3" /> Mostra Credenziali Accesso
-                    </button>
-                    <div id="credentials-box" className="hidden mt-4 p-6 rounded-3xl bg-zinc-900 border border-white/10 space-y-3">
-                      <div className="flex justify-between">
-                        <span className="text-[10px] font-black text-zinc-500">EMAIL:</span>
-                        <span className="text-[10px] font-black text-white uppercase">{selectedClient.email}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-[10px] font-black text-zinc-500">PASSWORD:</span>
-                        <span className="text-[10px] font-black text-accent">{selectedClient.password}</span>
-                      </div>
-                    </div>
-                  </div>
                 </div>
 
                 <div className="space-y-6">
-                  <h3 className="text-xs font-black text-zinc-500 uppercase tracking-[0.2em]">Stato Contratto</h3>
+                  <h3 className="text-xs font-black text-zinc-500 uppercase tracking-[0.2em]">Dati Atleta & Contratto</h3>
                   <div className={`p-6 rounded-3xl border space-y-6 ${theme === 'dark' ? 'bg-zinc-900/50 border-white/5' : 'bg-zinc-50 border-zinc-200'}`}>
+                    <div className="flex flex-col gap-4">
+                      <div className="flex justify-between items-center border-b border-white/5 pb-4">
+                        <span className="text-[10px] font-black text-zinc-500 uppercase">Età / Esperienza:</span>
+                        <div className="flex gap-2">
+                          <span className="px-3 py-1 bg-accent/20 text-accent rounded-lg text-[10px] font-black">{selectedClient.age || '??'} Anni</span>
+                          <span className="px-3 py-1 bg-accent/20 text-accent rounded-lg text-[10px] font-black">{selectedClient.experience_years || '0'} Exp</span>
+                        </div>
+                      </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <span className="text-[10px] font-black text-zinc-500 block mb-1">INIZIO:</span>
@@ -2303,6 +2537,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                       </div>
                     )}
                   </div>
+                </div>
                   
                   <button 
                     onClick={() => setView('history')}
@@ -2334,7 +2569,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                   <p className="text-xs text-zinc-600 italic line-clamp-2">{selectedClient.bio}</p>
                 </div>
               )}
-              <div className="flex gap-3">
+              <div className="flex flex-wrap gap-3 justify-center md:justify-end">
                 <button 
                   onClick={() => setView('load_model')}
                   className="p-4 rounded-2xl border border-zinc-200 text-zinc-600 hover:bg-zinc-50 transition-all hover:shadow-md"
@@ -2387,13 +2622,10 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
 
             {/* Quick Search */}
             <div className="relative">
-              <div className="absolute inset-y-0 left-6 flex items-center pointer-events-none">
-                <Search className="w-6 h-6 text-accent" />
-              </div>
               <input
                 type="text"
                 placeholder="Cerca esercizio (es. panca, squat, schiena, bicipiti...)"
-                className="input-field pl-16 py-6 bg-zinc-900/80 border-white/5 focus:bg-zinc-900 text-xl font-bold rounded-[2rem]"
+                className="input-field pl-8 py-6 bg-zinc-900/80 border-white/5 focus:bg-zinc-900 text-xl font-bold rounded-[2rem]"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -2592,7 +2824,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
           )
         ) : (
 
-          <div className="h-full flex items-center justify-center text-zinc-800 border-2 border-dashed border-white/5 rounded-[4rem] p-12 bg-zinc-900/20">
+          <div className="h-full hidden lg:flex items-center justify-center text-zinc-800 border-2 border-dashed border-white/5 rounded-[4rem] p-12 bg-zinc-900/20">
             <div className="text-center">
               <div className="w-28 h-28 bg-zinc-900 rounded-[2.5rem] flex items-center justify-center mx-auto mb-8 shadow-2xl border border-white/5">
                 <UserPlus className="w-12 h-12 text-accent/20" />
@@ -2602,6 +2834,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
@@ -2638,7 +2871,7 @@ const UserProfile = ({ user, onBack, theme }: { user: User, onBack: () => void, 
     <div className="space-y-10">
       <div className="flex items-center gap-6">
         <button onClick={onBack} className={`w-14 h-14 flex items-center justify-center border rounded-2xl hover:shadow-lg transition-all ${theme === 'light' ? 'bg-white border-zinc-200 shadow-zinc-200' : 'bg-zinc-900 border-white/10 shadow-accent/20'}`}>
-          <ArrowLeft className="w-6 h-6 text-accent" />
+          <ArrowLeft className={`w-6 h-6 ${theme === 'dark' ? 'text-accent' : 'text-zinc-900'}`} />
         </button>
         <div>
           <h2 className={`text-4xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Il Tuo Profilo</h2>
@@ -2683,6 +2916,7 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
   const [view, setView] = useState<'dashboard' | 'contact' | 'chat' | 'profile' | 'notifications'>('dashboard');
   const [coach, setCoach] = useState<User | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [expandedDays, setExpandedDays] = useState<string[]>(['Giorno A']);
 
   useEffect(() => {
     const fetchUnread = () => {
@@ -2710,21 +2944,33 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
   }, [user.id]);
 
   const updateNote = async (itemId: number, note: string) => {
+    // Aggiornamento ottimistico dello stato locale immediato
+    setPlan(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        items: prev.items.map(item => item.id === itemId ? { ...item, user_notes: note } : item)
+      };
+    });
+
     try {
       await fetch(`/api/plan-items/${itemId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_notes: note }),
       });
-      // Update local state
-      if (plan) {
-        setPlan({
-          ...plan,
-          items: plan.items.map(item => item.id === itemId ? { ...item, user_notes: note } : item)
-        });
-      }
     } catch (err) {
-      console.error(err);
+      console.error("Errore nel salvataggio della nota:", err);
+    }
+  };
+
+  const addNote = (itemId: number) => {
+    const newNote = prompt("Aggiungi una nota (carichi, sensazioni...):");
+    if (newNote) {
+      const item = plan?.items.find(i => i.id === itemId);
+      const existingNotes = item?.user_notes || "";
+      const updatedNotes = existingNotes ? `${existingNotes}\n${newNote}` : newNote;
+      updateNote(itemId, updatedNotes);
     }
   };
 
@@ -2803,19 +3049,11 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
   );
 
   return (
-    <div className="max-w-4xl mx-auto space-y-16">
+    <div className="max-w-7xl mx-auto px-6 sm:px-12 py-4 pb-40 space-y-12 sm:space-y-20">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-8">
-        <div className="flex items-center gap-8">
-          <div className="w-24 h-24 rounded-[2rem] flex items-center justify-center shadow-2xl overflow-hidden border-2 transition-colors duration-500" style={{ backgroundColor: theme === 'light' ? '#fff' : '#18181b', borderColor: theme === 'light' ? '#e4e4e7' : 'rgba(255,255,255,0.1)' }}>
-            <img 
-              src="https://i.imgur.com/Qbox1fT.jpeg" 
-              alt="Logo" 
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
-          </div>
-          <div>
-            <h2 className={`text-6xl font-display font-black italic uppercase tracking-tighter leading-none mb-3 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>La Tua Scheda</h2>
+        <div className="space-y-6">
+          <div className="text-left">
+            <h2 className={`text-5xl sm:text-7xl font-display font-black italic uppercase tracking-tighter leading-none mb-3 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>La Tua Scheda</h2>
             {plan && (
               <div className="flex items-center gap-3 text-zinc-500 font-bold uppercase tracking-widest text-[10px]">
                 <Clock className="w-4 h-4 text-accent" /> 
@@ -2823,59 +3061,19 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
               </div>
             )}
           </div>
-        </div>
-        <div className="flex gap-4">
-          <button 
-            onClick={() => setView('notifications')}
-            className={`p-4 border rounded-2xl transition-all hover:shadow-lg relative ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-400 hover:text-accent hover:shadow-zinc-200' : 'bg-zinc-900 border-white/10 text-zinc-500 hover:text-accent hover:shadow-accent/20'}`}
-            title="Notifiche"
-          >
-            <Bell className={`w-6 h-6 ${unreadCount > 0 ? 'animate-bounce text-accent' : ''}`} />
-            {unreadCount > 0 && (
-              <div className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-[10px] font-black text-white shadow-lg shadow-red-500/40">
-                {unreadCount}
-              </div>
-            )}
-          </button>
-          <button 
-            onClick={() => setView('profile')}
-            className={`p-4 border rounded-2xl transition-all hover:shadow-lg ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-400 hover:text-accent hover:shadow-zinc-200' : 'bg-zinc-900 border-white/10 text-zinc-500 hover:text-accent hover:shadow-accent/20'}`}
-            title="Profilo"
-          >
-            <Settings className="w-6 h-6" />
-          </button>
-          <button 
-            onClick={() => setView('chat')}
-            className={`px-8 py-4 rounded-2xl flex items-center gap-3 shadow-xl border transition-all relative ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900 hover:bg-zinc-50 hover:shadow-zinc-200' : 'bg-zinc-900 border-white/10 text-white hover:bg-zinc-800 hover:shadow-accent/10'}`}
-          >
-            <MessageSquare className="w-5 h-5 text-accent" />
-            <span className="text-xs font-black uppercase tracking-widest">Chat Coach</span>
-            {unreadCount > 0 && (
-              <div className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-[10px] font-black animate-bounce shadow-lg shadow-red-500/40">
-                {unreadCount}
-              </div>
-            )}
-          </button>
-          <button 
-            onClick={() => setView('contact')}
-            className={`px-8 py-4 rounded-2xl flex items-center gap-3 shadow-xl border transition-all ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900 hover:bg-zinc-50 hover:shadow-zinc-200' : 'bg-zinc-900 border-white/10 text-white hover:bg-zinc-800 hover:shadow-accent/10'}`}
-          >
-            <Mail className="w-5 h-5 text-accent" />
-            <span className="text-xs font-black uppercase tracking-widest">Contattami</span>
-          </button>
           {plan && (
-            <button 
-              onClick={downloadPDF}
-              className={`px-8 py-4 rounded-2xl flex items-center gap-3 shadow-xl border transition-all ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900 hover:bg-zinc-50 hover:shadow-zinc-200' : 'bg-zinc-900 border-white/10 text-white hover:bg-zinc-800 hover:shadow-accent/10'}`}
-            >
-              <Download className="w-5 h-5 text-accent" />
-              <span className="text-xs font-black uppercase tracking-widest">Scarica PDF</span>
-            </button>
-          )}
-          {plan && (
-            <div className="bg-accent text-black px-8 py-4 rounded-2xl flex items-center gap-3 shadow-xl shadow-accent/20">
-              <CheckCircle2 className="w-6 h-6" />
-              <span className="text-xs font-black uppercase tracking-widest">Programma Attivo</span>
+            <div className="flex items-center gap-4">
+              <div className="bg-accent text-black px-8 py-4 rounded-2xl flex items-center gap-3 shadow-xl shadow-accent/20 w-fit">
+                <CheckCircle2 className="w-6 h-6" />
+                <span className="text-xs font-black uppercase tracking-widest">Programma Attivo</span>
+              </div>
+              <button 
+                onClick={() => setView('profile')}
+                className={`w-14 h-14 flex items-center justify-center border rounded-2xl transition-all hover:shadow-lg ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900 hover:bg-zinc-100' : 'bg-zinc-900 border-white/10 text-accent hover:bg-white/5'}`}
+                title="Impostazioni Profilo"
+              >
+                <Settings className="w-6 h-6" />
+              </button>
             </div>
           )}
         </div>
@@ -2905,46 +3103,69 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
         </div>
       ) : (
         <div className="space-y-20">
-          {(Object.entries(groupedItems) as [string, PlanItem[]][]).sort().map(([day, items]) => (
-            <div key={day} className="space-y-10">
-              <div className="flex items-center gap-6">
-                <h3 className="text-5xl font-display font-black italic uppercase tracking-tighter text-accent">{day}</h3>
-                <div className={`h-px flex-1 ${theme === 'light' ? 'bg-zinc-200' : 'bg-white/5'}`} />
-              </div>
-              <div className="grid gap-8">
-                {items.map((item) => (
-                  <motion.div 
-                    key={item.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="glass p-10 rounded-[3.5rem] relative overflow-hidden group"
+          {(Object.entries(groupedItems) as [string, PlanItem[]][]).sort().map(([day, items]) => {
+            const isExpanded = expandedDays.includes(day);
+            return (
+              <div key={day} className="space-y-10">
+                <div className="flex items-center gap-6">
+                  <button 
+                    onClick={() => setExpandedDays(isExpanded ? expandedDays.filter(d => d !== day) : [...expandedDays, day])}
+                    className="flex items-center gap-4 group"
                   >
-                    <div className="flex flex-col md:flex-row gap-10">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-4 mb-3">
-                          <span className="w-3 h-3 rounded-full bg-accent shadow-lg shadow-accent/50" />
-                          <h4 className={`text-3xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{item.exercise_name}</h4>
-                        </div>
-                        <p className="text-2xl font-black italic text-zinc-500 mb-8 ml-7">
-                          {item.sets} x {item.reps} {item.pt_notes && <span className="text-accent/60 ml-2">({item.pt_notes})</span>}
-                        </p>
-                        <div className="relative ml-7">
-                          <textarea 
-                            className={`w-full border focus:ring-accent/20 focus:border-accent/20 rounded-3xl p-6 text-lg font-bold italic transition-all min-h-[120px] ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-600 placeholder:text-zinc-300' : 'bg-black/40 border-white/5 text-zinc-400 placeholder:text-zinc-700'}`}
-                            placeholder="Annotazioni (carichi, sensazioni)..."
-                            value={item.user_notes || ''}
-                            onChange={(e) => updateNote(item.id!, e.target.value)}
-                          />
-                        </div>
-                      </div>
+                    <h3 className="text-3xl sm:text-5xl font-display font-black italic uppercase tracking-tighter text-accent">{day}</h3>
+                    <div className={`w-10 h-10 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-transform ${isExpanded ? 'rotate-90' : ''} ${theme === 'light' ? 'bg-zinc-100' : 'bg-white/5'}`}>
+                      <ChevronRight className="w-6 h-6 text-accent" />
                     </div>
-                  </motion.div>
-                ))}
+                  </button>
+                  <div className={`h-px flex-1 ${theme === 'light' ? 'bg-zinc-200' : 'bg-white/5'}`} />
+                </div>
+                {isExpanded && (
+                  <div className="grid gap-8">
+                    {items.map((item) => (
+                      <motion.div 
+                        key={item.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="glass p-6 sm:p-10 rounded-[3.5rem] relative overflow-hidden group"
+                      >
+                        <div className="flex flex-col md:flex-row gap-10">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-4 mb-3">
+                              <span className="w-3 h-3 rounded-full bg-accent shadow-lg shadow-accent/50" />
+                              <h4 className={`text-2xl sm:text-3xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{item.exercise_name}</h4>
+                              <button 
+                                onClick={() => addNote(item.id!)}
+                                className={`p-2 rounded-xl transition-all ${theme === 'dark' ? 'text-accent hover:bg-white/5' : 'text-zinc-900 hover:bg-zinc-100'}`}
+                                title="Aggiungi Nota"
+                              >
+                                <FileText className="w-6 h-6" />
+                              </button>
+                            </div>
+                            <p className="text-xl sm:text-2xl font-black italic text-zinc-500 mb-6 ml-7">
+                              {item.sets} x {item.reps} {item.pt_notes && <span className="text-accent/60 ml-2">({item.pt_notes})</span>}
+                            </p>
+                            
+                            {item.user_notes && (
+                              <ul className="ml-7 space-y-2 mb-8">
+                                {item.user_notes.split('\n').filter(Boolean).map((note, idx) => (
+                                  <li key={idx} className="text-lg sm:text-xl font-bold italic text-zinc-400 flex items-start gap-4">
+                                    <span className="text-accent mt-1 select-none">•</span>
+                                    <span className="flex-1">{note}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
           
-          <div className={`p-16 rounded-[4rem] shadow-2xl relative overflow-hidden border transition-all ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900' : 'bg-zinc-900 border-white/5 text-white'}`}>
+          <div className={`p-8 sm:p-16 rounded-[4rem] shadow-2xl relative overflow-hidden border transition-all ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900' : 'bg-zinc-900 border-white/5 text-white'}`}>
             <div className="absolute top-0 right-0 w-96 h-96 bg-accent/10 rounded-full -mr-48 -mt-48 blur-[100px]" />
             <h4 className={`text-3xl font-display font-black italic uppercase tracking-tighter mb-10 flex items-center gap-4 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>
               <Info className="w-8 h-8 text-accent" /> NOTA BENE
@@ -2968,6 +3189,17 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
               </li>
             </ul>
           </div>
+          {plan && (
+            <div className="flex justify-center pt-10">
+              <button 
+                onClick={downloadPDF}
+                className="btn-primary flex items-center gap-3 px-12 py-5"
+              >
+                <Download className="w-6 h-6" />
+                <span className="text-sm font-black uppercase tracking-widest">Scarica PDF del Programma</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -2986,9 +3218,13 @@ const AboutMe = ({ user, theme, settings, onBack, updateSettings }: { user?: Use
     );
   }
 
+  const currentTextColor = theme === 'dark' 
+    ? (settings.about_text_color_dark || '#ffffff') 
+    : (settings.about_text_color_light || '#000000');
+
   const customStyles = {
     fontFamily: settings.about_font_family || 'Inter',
-    color: settings.about_text_color || (theme === 'dark' ? '#ffffff' : '#18181b')
+    color: currentTextColor
   };
 
   return (
@@ -2998,46 +3234,58 @@ const AboutMe = ({ user, theme, settings, onBack, updateSettings }: { user?: Use
         <div className="absolute bottom-[-10%] left-[-10%] w-[50%] h-[50%] bg-accent/5 blur-[150px] rounded-full" />
       </div>
 
-      <div className="max-w-7xl w-full grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-24 items-center relative z-10">
+      <div className={`max-w-7xl w-full grid ${String(settings.about_image_enabled) !== 'false' ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 max-w-4xl mx-auto'} gap-24 sm:gap-12 lg:gap-24 items-center relative z-10`}>
         <motion.div initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }} className="space-y-12">
           <div className="space-y-4">
-            <motion.div initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} className="h-1 w-24 bg-accent origin-left" />
-            <h1 className={`font-display font-black italic uppercase tracking-tighter leading-[0.85] transition-colors duration-500 ${!settings.about_text_color ? (theme === 'dark' ? 'text-white' : 'text-zinc-900') : ''}`} style={{ fontSize: settings.about_title_size || 'clamp(4rem, 15vw, 10rem)', color: settings.about_text_color }}>
+            {/* Blue line removed */}
+            <h1 
+              className="font-display font-black italic uppercase tracking-tighter leading-[0.85] transition-colors duration-500" 
+              style={{ 
+                fontSize: settings.about_title_size || 'clamp(1.5rem, 8vw, 10rem)', 
+                color: currentTextColor 
+              }}
+            >
               {settings.about_title || 'Pietro Cassago'}
             </h1>
-            <p className="text-accent font-black uppercase tracking-[0.3em] text-sm md:text-xl italic">
+            <p className="text-accent font-black uppercase tracking-[0.3em] text-[8px] sm:text-lg lg:text-xl italic">
               {settings.about_subtitle || 'Performance Elite'}
             </p>
           </div>
 
-          <p className="font-medium leading-relaxed opacity-80" style={{ fontSize: settings.about_desc_size || '1.25rem' }}>
+          <p className="font-medium leading-relaxed opacity-80 text-[8px] sm:text-base lg:text-xl" style={{ fontSize: settings.about_desc_size ? `calc(${settings.about_desc_size} * 0.4)` : undefined }}>
             {settings.about_description}
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-            {[1, 2, 3].map((i) => {
-              if (settings[`box${i}_enabled`] === false) return null;
+          <div className="grid grid-cols-2 gap-2 sm:gap-6">
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((i, index) => {
+              if (settings[`box${i}_enabled`] === false || !settings[`box${i}_enabled`]) return null;
+              const isEven = (index + 1) % 2 === 0;
               return (
                 <div 
                   key={i} 
-                  className="p-12 flex flex-col justify-center rounded-[3.5rem] shadow-xl group hover:scale-105 transition-all"
+                  className={`p-4 sm:p-12 flex flex-col justify-center rounded-[1.5rem] sm:rounded-[3.5rem] shadow-xl group hover:scale-105 transition-all w-full ${isEven ? 'mt-8 sm:mt-32 md:ml-auto md:mr-0' : 'md:mr-auto md:ml-0'}`}
                   style={{ 
                     backgroundColor: settings[`box${i}_bg`] || '#2350D1',
-                    minHeight: `${settings.about_box_size || 220}px`,
-                    width: `${settings.about_box_width || 100}%`
+                    minHeight: `calc(${settings[`box${i}_height`] || settings.about_box_size || 220}px * 0.4)`,
+                    width: '100%',
+                    maxWidth: `${settings[`box${i}_width`] || 300}px`
                   }}
                 >
                   <span 
-                    className="text-[12px] font-black uppercase tracking-[0.2em] mb-3 opacity-70"
+                    className="text-[6px] sm:text-[12px] font-black uppercase tracking-[0.2em] mb-1 sm:mb-3 opacity-70"
                     style={{ color: settings[`box${i}_color`] || '#ffffff' }}
                   >
-                    {settings[`box${i}_label`] || (i === 1 ? 'Specialty' : i === 2 ? 'Focus' : 'Quality')}
+                    {settings[`box${i}_label`] || `Info ${i}`}
                   </span>
                   <span 
-                    className="text-3xl font-display font-black italic uppercase tracking-tighter"
-                    style={{ color: settings[`box${i}_color`] || '#ffffff' }}
+                    className="font-display font-black italic uppercase tracking-tighter"
+                    style={{ 
+                      color: settings[`box${i}_color`] || '#ffffff',
+                      fontSize: `calc(${settings[`box${i}_font_size`] || 30}px * 0.5)`,
+                      lineHeight: '1'
+                    }}
                   >
-                    {settings[`box${i}_value`] || (i === 1 ? 'Calisthenics' : i === 2 ? 'Performance' : 'Elite')}
+                    {settings[`box${i}_value`] || '...'}
                   </span>
                 </div>
               );
@@ -3045,22 +3293,26 @@ const AboutMe = ({ user, theme, settings, onBack, updateSettings }: { user?: Use
           </div>
         </motion.div>
 
-        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="relative">
-          {user?.role === 'pt' && (
+        {user?.role === 'pt' && (
+          <div className="absolute top-4 right-4 md:-top-6 md:-right-6 z-50">
             <button 
               onClick={() => setIsEditing(true)}
-              className="absolute -top-6 -right-6 z-20 bg-accent text-black p-4 rounded-2xl shadow-xl shadow-accent/20 hover:scale-110 transition-all font-black"
+              className="bg-accent text-black p-4 rounded-2xl shadow-xl shadow-accent/20 hover:scale-110 transition-all font-black"
             >
               <Settings className="w-6 h-6" />
             </button>
-          )}
-          <div className="relative aspect-square md:aspect-[4/5] lg:aspect-square">
-            <div className="absolute inset-0 border-[20px] border-accent/10 rounded-[4rem]" />
-            <div className="absolute inset-[20px] bg-zinc-900 rounded-[3rem] overflow-hidden">
-              <img src={settings.about_image || "https://picsum.photos/seed/coachbellu/800/800"} alt="Coach" className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-1000" />
-            </div>
           </div>
-        </motion.div>
+        )}
+        {String(settings.about_image_enabled) !== 'false' && (
+          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="relative">
+            <div className="relative aspect-square md:aspect-[4/5] lg:aspect-square">
+              <div className="absolute inset-0 border-[20px] border-accent/10 rounded-[4rem]" />
+              <div className="absolute inset-[20px] bg-zinc-900 rounded-[3rem] overflow-hidden">
+                <img src={settings.about_image || "https://picsum.photos/seed/coachbellu/800/800"} alt="Coach" className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-1000" />
+              </div>
+            </div>
+          </motion.div>
+        )}
       </div>
     </div>
   );
@@ -3069,12 +3321,72 @@ const AboutMe = ({ user, theme, settings, onBack, updateSettings }: { user?: Use
 
 // --- Main App ---
 
+const PrivacyPolicy = ({ settings, theme }: any) => {
+  const [lang, setLang] = useState<'it' | 'en'>('it');
+
+  return (
+    <div className={`min-h-screen py-20 px-6 ${theme === 'dark' ? 'bg-black text-white' : 'bg-zinc-50 text-zinc-900'}`}>
+      <div className="max-w-4xl mx-auto space-y-12">
+        <div className="flex justify-between items-center">
+          <a href="/" className={`inline-flex items-center gap-2 font-black uppercase tracking-widest text-xs transition-colors ${theme === 'dark' ? 'text-zinc-500 hover:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>
+            <ArrowLeft className="w-4 h-4" /> {lang === 'it' ? 'Torna alla Home' : 'Back to Home'}
+          </a>
+          <button 
+            onClick={() => setLang(lang === 'it' ? 'en' : 'it')}
+            className={`px-4 py-2 text-xs font-black uppercase tracking-widest rounded-xl border transition-all ${theme === 'dark' ? 'text-zinc-300 border-white/10 hover:bg-white/5' : 'text-zinc-700 border-zinc-200 hover:bg-zinc-100'}`}
+          >
+            {lang === 'it' ? 'EN' : 'IT'}
+          </button>
+        </div>
+        <h1 className="text-5xl font-display font-black italic uppercase tracking-tighter text-accent">Privacy Policy</h1>
+        
+        <div className={`glass p-12 rounded-[3.5rem] space-y-8 text-sm md:text-base leading-relaxed ${theme === 'dark' ? 'text-zinc-300' : 'text-zinc-700'}`}>
+          {lang === 'it' ? (
+            <>
+              <p><strong>Titolare del Trattamento:</strong> {settings?.privacy_owner_name || 'Bellu Riccardo'} ({settings?.privacy_owner_email || 'belluriccardo@gmail.com'})</p>
+              <p><strong>Dati Raccolti:</strong> {settings?.privacy_data_collected || 'email, password (criptata), peso, altezza, condizioni di salute'}</p>
+              <p><strong>Finalità del Trattamento:</strong> {settings?.privacy_purpose || 'gestione account e programmi di allenamento personalizzati'}</p>
+              <p><strong>Conservazione dei Dati:</strong> {settings?.privacy_retention || 'I dati personali sono conservati per la durata del rapporto di coaching e cancellati entro 12 mesi dalla terminazione dell\'account, su richiesta dell\'utente o quando non più necessari.'}</p>
+              <p><strong>Hosting:</strong> {settings?.privacy_hosting || 'Render (render.com)'}</p>
+              <p><strong>Database:</strong> {settings?.privacy_database || 'Turso (turso.tech)'}</p>
+              
+              <p><strong>Base Giuridica:</strong> I dati sono trattati sulla base del consenso esplicito dell'utente ai sensi degli artt. 6 e 9 del GDPR.</p>
+              <p><strong>Diritti dell'Utente:</strong> Hai il diritto di: accedere ai tuoi dati personali, rettificare dati inesatti, richiedere la cancellazione dei tuoi dati, opporti al trattamento, richiedere la portabilità dei dati. Per esercitare questi diritti scrivi a belluriccardo@gmail.com</p>
+              <p><strong>Diritto di Reclamo:</strong> Hai il diritto di presentare reclamo al Garante per la Protezione dei Dati Personali all'indirizzo <a href="https://www.garanteprivacy.it" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline transition-all">www.garanteprivacy.it</a></p>
+              
+              <p className="pt-8 border-t border-white/10 text-xs italic opacity-80">Ultimo aggiornamento: {new Date().toLocaleDateString()}</p>
+            </>
+          ) : (
+            <>
+              <p><strong>Data Controller:</strong> {settings?.privacy_owner_name || 'Bellu Riccardo'} ({settings?.privacy_owner_email || 'belluriccardo@gmail.com'})</p>
+              <p><strong>Data Collected:</strong> {settings?.privacy_data_collected || 'email, encrypted password, weight, height, health conditions'}</p>
+              <p><strong>Purpose of Processing:</strong> {settings?.privacy_purpose || 'account management and personalized training programs'}</p>
+              <p><strong>Data Retention:</strong> {settings?.privacy_retention || 'Personal data is kept for the duration of the coaching relationship and deleted within 12 months of account termination, upon user request or when no longer necessary.'}</p>
+              <p><strong>Hosting:</strong> {settings?.privacy_hosting || 'Render (render.com)'}</p>
+              <p><strong>Database:</strong> {settings?.privacy_database || 'Turso (turso.tech)'}</p>
+              
+              <p><strong>Legal Basis:</strong> Data is processed based on the explicit consent of the user pursuant to articles 6 and 9 of the GDPR.</p>
+              <p><strong>User Rights:</strong> You have the right to: access your personal data, rectify inaccurate data, request the deletion of your data, object to the processing, request data portability. To exercise these rights write to belluriccardo@gmail.com</p>
+              <p><strong>Right to Complain:</strong> You have the right to lodge a complaint with the Data Protection Authority at <a href="https://www.garanteprivacy.it" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline transition-all">www.garanteprivacy.it</a></p>
+              
+              <p className="pt-8 border-t border-white/10 text-xs italic opacity-80">Last update: {new Date().toLocaleDateString()}</p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('fitplan_user');
     return saved ? JSON.parse(saved) : null;
   });
-  const [activeTab, setActiveTab] = useState<'home' | 'dashboard' | 'about' | 'models'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'dashboard' | 'about' | 'models' | 'notifications' | 'chat'>(() => {
+    if (user?.role === 'user') return 'dashboard';
+    return 'home';
+  });
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const saved = localStorage.getItem('fitplan_theme');
     return (saved as 'dark' | 'light') || 'dark';
@@ -3084,6 +3396,29 @@ export default function App() {
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [models, setModels] = useState<ModelPlan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedClient, setSelectedClient] = useState<User | null>(null);
+  const [ptTargetView, setPtTargetView] = useState<'editor' | 'chat' | null>(null);
+  const [coach, setCoach] = useState<User | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const fetchUnread = async () => {
+    if (!user) return;
+    try {
+      const res = await fetch(`/api/notifications/${user.id}`);
+      const data = await res.json();
+      if (Array.isArray(data)) setUnreadCount(data.length);
+    } catch (err) {
+      console.error("Error fetching unread:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchUnread();
+      const interval = setInterval(fetchUnread, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [user?.id]);
 
   const refreshClients = () => fetch('/api/users').then(res => res.json()).then(setClients);
   const refreshExercises = () => fetch('/api/exercises').then(res => res.json()).then(setExercises);
@@ -3095,10 +3430,15 @@ export default function App() {
       Promise.all([refreshClients(), refreshExercises(), refreshModels()]).then(() => setLoading(false));
     } else {
       setLoading(false);
+      // Fetch coach info for athletes
+      fetch('/api/coach')
+        .then(res => res.json())
+        .then(setCoach);
     }
   }, [user]);
 
   const isResetPage = window.location.pathname === '/reset-password';
+  const isPrivacyPage = window.location.pathname === '/privacy';
 
   useEffect(() => {
     localStorage.setItem('fitplan_theme', theme);
@@ -3123,12 +3463,16 @@ export default function App() {
     return <ResetPassword />;
   }
 
+  if (isPrivacyPage) {
+    return <PrivacyPolicy settings={settings} theme={theme} />;
+  }
+
   if (!user) {
     return <Auth onLogin={handleLogin} />;
   }
 
   return (
-    <div className={`min-h-screen pb-24 transition-colors duration-500 ${theme === 'dark' ? 'bg-black text-white' : 'bg-zinc-50 text-zinc-900'}`}>
+    <div className={`${activeTab === 'dashboard' && user.role === 'pt' ? 'h-screen overflow-hidden' : 'min-h-screen pb-24'} flex flex-col transition-colors duration-500 ${theme === 'dark' ? 'bg-black text-white' : 'bg-zinc-50 text-zinc-900'}`}>
       {/* Header */}
       <header className={`backdrop-blur-2xl border-b sticky top-0 z-20 transition-colors duration-500 ${theme === 'dark' ? 'bg-black/80 border-white/5' : 'bg-white/80 border-zinc-200'}`}>
         <div className="max-w-7xl mx-auto px-6 h-28 flex items-center justify-between">
@@ -3147,22 +3491,24 @@ export default function App() {
             </div>
           </div>
 
-          <nav className="flex items-center gap-3">
-            <button 
-              onClick={() => setActiveTab('home')}
-              className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${
-                activeTab === 'home' ? 'bg-accent text-black shadow-xl shadow-accent/20' : (theme === 'dark' ? 'text-zinc-500 hover:text-white hover:bg-white/5' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100')
-              }`}
-            >
-              Home
-            </button>
+          <nav className="hidden md:flex items-center gap-3">
+            {user.role === 'pt' && (
+              <button 
+                onClick={() => setActiveTab('home')}
+                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${
+                  activeTab === 'home' ? 'bg-accent text-black shadow-xl shadow-accent/20' : (theme === 'dark' ? 'text-zinc-500 hover:text-white hover:bg-white/5' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100')
+                }`}
+              >
+                Home
+              </button>
+            )}
             <button 
               onClick={() => setActiveTab('dashboard')}
               className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${
                 activeTab === 'dashboard' ? 'bg-accent text-black shadow-xl shadow-accent/20' : (theme === 'dark' ? 'text-zinc-500 hover:text-white hover:bg-white/5' : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100')
               }`}
             >
-              Atleti
+              {user.role === 'pt' ? 'ATLETI' : 'SCHEDA'}
             </button>
             {user.role === 'pt' && (
               <button 
@@ -3184,7 +3530,31 @@ export default function App() {
             </button>
           </nav>
 
-          <div className="flex items-center gap-8">
+          <div className="flex items-center gap-5">
+            <button 
+              onClick={() => setActiveTab('notifications')}
+              className={`w-14 h-14 flex items-center justify-center rounded-2xl transition-all border relative ${activeTab === 'notifications' ? 'bg-accent border-accent text-black' : (theme === 'dark' ? 'bg-zinc-900 text-accent border-white/5 hover:bg-zinc-800' : 'bg-white text-zinc-900 border-zinc-200 hover:bg-zinc-100')}`}
+              title="Notifiche"
+            >
+              <Bell className="w-6 h-6" />
+              {unreadCount > 0 && (
+                <div className="absolute -top-1 -left-1 w-6 h-6 bg-accent rounded-full flex items-center justify-center text-[10px] font-black text-black shadow-lg shadow-accent/20 border-2 border-black">
+                  {unreadCount}
+                </div>
+              )}
+            </button>
+            <button 
+              onClick={() => setActiveTab('chat')}
+              className={`w-14 h-14 flex items-center justify-center rounded-2xl transition-all border relative ${activeTab === 'chat' ? 'bg-accent border-accent text-black' : (theme === 'dark' ? 'bg-zinc-900 text-accent border-white/5 hover:bg-zinc-800' : 'bg-white text-zinc-900 border-zinc-200 hover:bg-zinc-100')}`}
+              title="Chat"
+            >
+              <MessageSquare className="w-6 h-6" />
+              {unreadCount > 0 && (
+                <div className="absolute -top-1 -right-1 w-6 h-6 bg-accent rounded-full flex items-center justify-center text-[10px] font-black text-black shadow-lg shadow-accent/20 border-2 border-black">
+                  {unreadCount}
+                </div>
+              )}
+            </button>
             <button 
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               className={`w-14 h-14 flex items-center justify-center rounded-2xl transition-all border ${theme === 'dark' ? 'bg-zinc-900 text-accent border-white/5 hover:bg-zinc-800' : 'bg-white text-zinc-900 border-zinc-200 hover:bg-zinc-50'}`}
@@ -3198,17 +3568,17 @@ export default function App() {
             </div>
             <button 
               onClick={handleLogout}
-              className={`w-14 h-14 flex items-center justify-center rounded-2xl transition-all border ${theme === 'dark' ? 'bg-zinc-900 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 border-white/5' : 'bg-white text-zinc-400 hover:text-red-500 hover:bg-red-50 border-zinc-200'}`}
+              className={`w-14 h-14 flex items-center justify-center rounded-2xl transition-all border ${theme === 'dark' ? 'bg-zinc-900 text-accent border-white/5 hover:bg-zinc-800' : 'bg-white text-zinc-900 border-zinc-200 hover:bg-zinc-50'}`}
               title="Logout"
             >
-              <LogOut className="w-6 h-6" />
+              <LogOut className="w-6 h-6 hover:text-red-500 transition-colors" />
             </button>
           </div>
         </div>
       </header>
 
       {/* Content */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className={`max-w-7xl mx-auto flex-1 w-full ${activeTab === 'dashboard' && user.role === 'pt' ? 'px-4 py-4 flex flex-col min-h-0 overflow-hidden' : 'px-4 py-8 overflow-y-auto'}`}>
         <AnimatePresence mode="wait">
           {activeTab === 'home' ? (
             <motion.div
@@ -3217,7 +3587,19 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              {user.role === 'pt' ? <PTHome user={user} theme={theme} /> : <UserDashboard user={user} theme={theme} />}
+              {user.role === 'pt' ? (
+                <PTHome 
+                  user={user} 
+                  theme={theme} 
+                  onAthleteClick={(client) => {
+                    setSelectedClient(client);
+                    setActiveTab('dashboard');
+                  }}
+                  onNotificationsClick={() => setActiveTab('notifications')}
+                />
+              ) : (
+                <UserDashboard user={user} theme={theme} />
+              )}
             </motion.div>
           ) : activeTab === 'dashboard' ? (
             <motion.div
@@ -3225,8 +3607,26 @@ export default function App() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
+              className={user.role === 'pt' ? "flex-1 min-h-0 flex flex-col" : ""}
             >
-              {user.role === 'pt' ? <PTDashboard pt={user} theme={theme} clients={clients} exercises={exercises} models={models} refreshClients={refreshClients} refreshExercises={refreshExercises} refreshModels={refreshModels} /> : <UserDashboard user={user} theme={theme} />}
+              {user.role === 'pt' ? (
+                <PTDashboard 
+                  pt={user} 
+                  theme={theme} 
+                  clients={clients} 
+                  exercises={exercises} 
+                  models={models} 
+                  refreshClients={refreshClients} 
+                  refreshExercises={refreshExercises} 
+                  refreshModels={refreshModels}
+                  selectedClient={selectedClient}
+                  setSelectedClient={setSelectedClient}
+                  initialView={ptTargetView}
+                  onViewHandled={() => setPtTargetView(null)}
+                />
+              ) : (
+                <UserDashboard user={user} theme={theme} />
+              )}
             </motion.div>
           ) : activeTab === 'models' ? (
             <motion.div
@@ -3239,9 +3639,10 @@ export default function App() {
                 models={models} 
                 exercises={exercises} 
                 onUpdate={refreshModels} 
+                theme={theme}
               />
             </motion.div>
-          ) : (
+          ) : activeTab === 'about' ? (
             <motion.div
               key="about"
               initial={{ opacity: 0, y: 10 }}
@@ -3250,26 +3651,112 @@ export default function App() {
             >
               <AboutMe settings={settings} theme={theme} user={user} onBack={() => setActiveTab('home')} updateSettings={(s: any) => setSettings(s)} />
             </motion.div>
+          ) : activeTab === 'chat' ? (
+            <motion.div
+              key="chat-page"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <div className="max-w-4xl mx-auto mt-10">
+                {coach ? (
+                  <Chat currentUser={user} otherUser={coach} onBack={() => setActiveTab('dashboard')} theme={theme} />
+                ) : (
+                  <div className="text-center py-20 text-zinc-500 font-bold uppercase tracking-widest text-xs">Caricamento dati coach...</div>
+                )}
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="notifications-page"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <Notifications 
+                coachId={user.id} 
+                onBack={() => setActiveTab('home')} 
+                onReply={(userId) => {
+                  if (user.role === 'pt') {
+                    const client = clients.find(c => c.id === userId);
+                    if (client) {
+                      setSelectedClient(client);
+                      setPtTargetView('chat');
+                      setActiveTab('dashboard');
+                    }
+                  }
+                }} 
+                theme={theme} 
+                fullView={true}
+              />
+            </motion.div>
           )}
         </AnimatePresence>
       </main>
 
+      {/* Universal Footer */}
+      {!(activeTab === 'dashboard' && user?.role === 'pt') && (
+        <footer className="max-w-7xl mx-auto px-4 py-8 text-center border-t border-white/5 pb-28 md:pb-8">
+          <a href="/privacy" className="text-zinc-500 hover:text-accent font-bold text-xs uppercase tracking-widest block mb-2 transition-colors">Privacy Policy</a>
+          <p className="text-zinc-600 text-[10px] uppercase font-black tracking-widest leading-relaxed max-w-2xl mx-auto">
+            I contenuti di questo sito sono a solo scopo informativo e non costituiscono un consiglio medico. Consulta un medico prima di iniziare qualsiasi programma di allenamento.
+          </p>
+        </footer>
+      )}
+
       {/* Mobile Footer Nav */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-black/90 backdrop-blur-2xl border-t border-white/5 px-8 py-4 flex justify-around items-center z-30">
-        <button 
-          onClick={() => setActiveTab('home')}
-          className={`flex flex-col items-center gap-2 ${activeTab === 'home' ? 'text-accent' : 'text-zinc-600'}`}
-        >
-          <UserIcon className="w-7 h-7" />
-          <span className="text-[10px] font-black uppercase tracking-widest">Home</span>
-        </button>
+        {user.role === 'pt' && (
+          <button 
+            onClick={() => setActiveTab('home')}
+            className={`flex flex-col items-center gap-2 relative ${activeTab === 'home' ? 'text-accent' : 'text-zinc-600'}`}
+          >
+            <Home className="w-7 h-7" />
+            <span className="text-[10px] font-black uppercase tracking-widest">Home</span>
+            {unreadCount > 0 && (
+              <div className="absolute -top-1 -left-1 w-5 h-5 bg-accent rounded-full flex items-center justify-center text-[10px] font-black text-black shadow-lg shadow-accent/20 border-2 border-black">
+                {unreadCount}
+              </div>
+            )}
+          </button>
+        )}
         <button 
           onClick={() => setActiveTab('dashboard')}
           className={`flex flex-col items-center gap-2 ${activeTab === 'dashboard' ? 'text-accent' : 'text-zinc-600'}`}
         >
           <ClipboardList className="w-7 h-7" />
-          <span className="text-[10px] font-black uppercase tracking-widest">Dashboard</span>
+          <span className="text-[10px] font-black uppercase tracking-widest">{user.role === 'pt' ? 'ATLETI' : 'SCHEDA'}</span>
         </button>
+        {user.role === 'pt' && (
+          <button 
+            onClick={() => setActiveTab('models')}
+            className={`flex flex-col items-center gap-2 ${activeTab === 'models' ? 'text-accent' : 'text-zinc-600'}`}
+          >
+            <Copy className="w-7 h-7" />
+            <span className="text-[10px] font-black uppercase tracking-widest">Modelli</span>
+          </button>
+        )}
+        {user.role === 'user' && (
+          <button 
+            onClick={() => {
+              // We need setView is inside UserDashboard, but we can change activeTab or something.
+              // Actually, UserDashboard handles its own views.
+              // To make Chat standalone, we should probably add a tab 'chat' in App.
+              setActiveTab('chat' as any);
+            }}
+            className={`flex flex-col items-center gap-2 relative ${activeTab === 'chat' ? 'text-accent' : 'text-zinc-600'}`}
+          >
+            <div className="w-8 h-8 flex items-center justify-center bg-[#25D366] rounded-full text-white shadow-lg shadow-[#25D366]/20">
+              <MessageSquare className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-widest">Chat</span>
+            {unreadCount > 0 && (
+              <div className="absolute -top-1 -right-1 w-5 h-5 bg-accent rounded-full flex items-center justify-center text-[10px] font-black text-black shadow-lg shadow-accent/20 border-2 border-black">
+                {unreadCount}
+              </div>
+            )}
+          </button>
+        )}
         <button 
           onClick={() => setActiveTab('about')}
           className={`flex flex-col items-center gap-2 ${activeTab === 'about' ? 'text-accent' : 'text-zinc-600'}`}

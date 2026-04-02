@@ -3,7 +3,6 @@ import { createServer as createViteServer } from "vite";
 import { createClient } from "@libsql/client";
 import path from "path";
 import { fileURLToPath } from "url";
-import nodemailer from "nodemailer";
 import crypto from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -188,21 +187,27 @@ async function startServer() {
         }
     });
 
-    const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || "smtp-relay.brevo.com",
-        port: parseInt(process.env.SMTP_PORT || "465"),
-        secure: parseInt(process.env.SMTP_PORT || "465") === 465,
-        auth: {
-            user: process.env.SMTP_USER || "demo_user",
-            pass: process.env.SMTP_PASS || "demo_pass",
-        },
-    });
-
     const sendMail = async (to: string, subject: string, text: string) => {
         console.log(`[EMAIL] Sending to: ${to} | Subject: ${subject} | Content: ${text}`);
-        if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+        if (process.env.BREVO_API_KEY) {
             try {
-                await transporter.sendMail({ from: '"Coach Bellu" <no-reply@coachbellu.com>', to, subject, text });
+                const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "api-key": process.env.BREVO_API_KEY,
+                    },
+                    body: JSON.stringify({
+                        sender: { name: "Coach Bellu", email: "no-reply@coachbellu.com" },
+                        to: [{ email: to }],
+                        subject: subject,
+                        textContent: text,
+                    }),
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    console.error("Brevo API error:", err);
+                }
             } catch (err) {
                 console.error("Error sending email:", err);
             }

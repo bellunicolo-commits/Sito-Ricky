@@ -3,8 +3,10 @@ import { createServer as createViteServer } from "vite";
 import { createClient } from "@libsql/client";
 import path from "path";
 import { fileURLToPath } from "url";
-import nodemailer from "nodemailer";
 import crypto from "crypto";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import cookieParser from "cookie-parser";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -127,8 +129,10 @@ try { await db.execute("ALTER TABLE model_items ADD COLUMN recovery TEXT"); } ca
 try { await db.execute("ALTER TABLE model_items ADD COLUMN notes TEXT"); } catch {}
 
 // Seed initial data - INSERT OR IGNORE prevents duplicates on restart
-await db.execute({ sql: "INSERT OR IGNORE INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: ["pt@coachbellu.com", "password", "Coach Bellu", "pt"] });
-await db.execute({ sql: "INSERT OR IGNORE INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: ["user@coachbellu.com", "password", "Luca Cliente", "user"] });
+const ptHash = await bcrypt.hash("password", 10);
+const userHash = await bcrypt.hash("password", 10);
+await db.execute({ sql: "INSERT OR IGNORE INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: ["pt@coachbellu.com", ptHash, "Coach Bellu", "pt"] });
+await db.execute({ sql: "INSERT OR IGNORE INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: ["user@coachbellu.com", userHash, "Luca Cliente", "user"] });
 
 const userCount = await db.execute("SELECT count(*) as count FROM users");
 if ((userCount.rows[0] as any).count <= 2) {
@@ -146,11 +150,6 @@ if ((userCount.rows[0] as any).count <= 2) {
     { name: "Curl Bilanciere", category: "braccia" },
     { name: "Pushdown", category: "braccia" }
   ];
-  for (const ex of exercises) {
-    // We don't have unique constraint on exercises name in the schema, but we shouldn't insert duplicates anyway.
-    // However, since there's no unique constraint, INSERT OR IGNORE won't work on exercises if they exist.
-    // Instead we can just check if table is empty. But let's just use INSERT OR IGNORE on settings since it has key UNIQUE.
-  }
 
   const exCount = await db.execute("SELECT count(*) as count FROM exercises");
   if ((exCount.rows[0] as any).count === 0) {
@@ -176,38 +175,70 @@ if ((userCount.rows[0] as any).count <= 2) {
 async function startServer() {
   const app = express();
   app.use(express.json());
-  const PORT = 3000;
+  app.use(cookieParser());
+  const PORT = Number(process.env.PORT) || 3000;
+  const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_dev";
+
+  // Simplified authenticate for dev - no-op to avoid breaking routes but not checking tokens
+  const authenticate = (req: any, res: any, next: any) => next();
+
+  // ✅ Brevo HTTP API - replaces nodemailer SMTP
+  const sendMail = async (to: string, subject: string, text: string) => {
+    console.log(`[EMAIL] Sending to: ${to} | Subject: ${subject}`);
+    if (!process.env.BREVO_API_KEY) {
+      console.log("[EMAIL] No BREVO_API_KEY set, skipping email.");
+      return;
+    }
+    try {
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": process.env.BREVO_API_KEY,
+        },
+        body: JSON.stringify({
+          sender: { name: "Coach Bellu", email: "bellunicolo@gmail.com" },
+          to: [{ email: to }],
+          subject: subject,
+          textContent: text,
+        }),
+      });
+      if (!response.ok) {
+        const err = await response.text();
+        console.error("[EMAIL] Brevo error:", err);
+      } else {
+        console.log("[EMAIL] Sent successfully via Brevo API");
+      }
+    } catch (err) {
+      console.error("[EMAIL] Error sending email:", err);
+    }
+  };
 
   app.post("/api/login", async (req, res) => {
     const { email, password } = req.body;
-    const result = await db.execute({ sql: "SELECT id, email, name, role, bio, notification_email, email_notifications_enabled, contract_start, contract_end, experience_years, age FROM users WHERE email = ? AND password = ?", args: [email, password] });
+    const result = await db.execute({ sql: "SELECT * FROM users WHERE email = ?", args: [email] });
     if (result.rows.length > 0) {
-      res.json(result.rows[0]);
+      const user: any = result.rows[0];
+      const match = await bcrypt.compare(password, user.password);
+      if (match) {
+        const token = jwt.sign({ id: user.id.toString(), role: user.role, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+        delete user.password;
+        res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' });
+        res.json(user);
+      } else {
+        res.status(401).json({ error: "Credenziali non valide" });
+      }
     } else {
       res.status(401).json({ error: "Credenziali non valide" });
     }
   });
 
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || "smtp.ethereal.email",
-    port: parseInt(process.env.SMTP_PORT || "587"),
-    secure: false,
-    auth: {
-      user: process.env.SMTP_USER || "demo_user",
-      pass: process.env.SMTP_PASS || "demo_pass",
-    },
+  app.post("/api/logout", (req, res) => {
+    res.clearCookie("token");
+    res.json({ success: true });
   });
 
-  const sendMail = async (to: string, subject: string, text: string) => {
-    console.log(`[EMAIL] Sending to: ${to} | Subject: ${subject} | Content: ${text}`);
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-      try {
-        await transporter.sendMail({ from: '"Coach Bellu" <no-reply@coachbellu.com>', to, subject, text });
-      } catch (err) {
-        console.error("Error sending email:", err);
-      }
-    }
-  };
+
 
   app.post("/api/forgot-password", async (req, res) => {
     const { email } = req.body;
@@ -230,7 +261,8 @@ async function startServer() {
     const result = await db.execute({ sql: "SELECT * FROM password_reset_tokens WHERE token = ? AND expires_at > ?", args: [token, new Date().toISOString()] });
     const resetToken = result.rows[0] as any;
     if (resetToken) {
-      await db.execute({ sql: "UPDATE users SET password = ? WHERE id = ?", args: [password, resetToken.user_id] });
+      const hashedPassword = await bcrypt.hash(password, 10);
+      await db.execute({ sql: "UPDATE users SET password = ? WHERE id = ?", args: [hashedPassword, resetToken.user_id] });
       await db.execute({ sql: "DELETE FROM password_reset_tokens WHERE id = ?", args: [resetToken.id] });
       res.json({ message: "Password aggiornata con successo!" });
     } else {
@@ -238,7 +270,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/messages", async (req, res) => {
+  app.post("/api/messages", async (req: any, res) => {
     const { sender_id, receiver_id, content } = req.body;
     const result = await db.execute({ sql: "INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)", args: [sender_id, receiver_id, content] });
     const receiver = (await db.execute({ sql: "SELECT * FROM users WHERE id = ?", args: [receiver_id] })).rows[0] as any;
@@ -250,25 +282,26 @@ async function startServer() {
     res.json({ id: result.lastInsertRowid, sender_id, receiver_id, content });
   });
 
-  app.get("/api/messages/:userId", async (req, res) => {
+  app.get("/api/messages/:userId", async (req: any, res) => {
     const { userId } = req.params;
     const { otherId } = req.query;
     const result = await db.execute({ sql: `SELECT * FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY created_at ASC`, args: [userId, otherId as string, otherId as string, userId] });
     res.json(result.rows);
   });
 
-  app.get("/api/notifications/:userId", async (req, res) => {
-    const result = await db.execute({ sql: `SELECT m.*, u.name as sender_name FROM messages m JOIN users u ON m.sender_id = u.id WHERE m.receiver_id = ? AND m.is_read = 0 ORDER BY m.created_at DESC`, args: [req.params.userId] });
+  app.get("/api/notifications/:userId", async (req: any, res) => {
+    const targetId = req.params.userId;
+    const result = await db.execute({ sql: `SELECT m.*, u.name as sender_name FROM messages m JOIN users u ON m.sender_id = u.id WHERE m.receiver_id = ? AND m.is_read = 0 ORDER BY m.created_at DESC`, args: [targetId] });
     res.json(result.rows);
   });
 
-  app.patch("/api/messages/read", async (req, res) => {
+  app.patch("/api/messages/read", async (req: any, res) => {
     const { receiverId, senderId } = req.body;
     await db.execute({ sql: "UPDATE messages SET is_read = 1 WHERE receiver_id = ? AND sender_id = ?", args: [receiverId, senderId] });
     res.json({ success: true });
   });
 
-  app.patch("/api/users/:id/notifications", async (req, res) => {
+  app.patch("/api/users/:id/notifications", async (req: any, res) => {
     const { notification_email, email_notifications_enabled } = req.body;
     await db.execute({ sql: "UPDATE users SET notification_email = ?, email_notifications_enabled = ? WHERE id = ?", args: [notification_email, email_notifications_enabled ? 1 : 0, req.params.id] });
     res.json({ success: true });
@@ -277,21 +310,19 @@ async function startServer() {
   app.post("/api/register", async (req, res) => {
     const { email, password, name } = req.body;
     try {
-      const result = await db.execute({ sql: "INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: [email, password, name, 'user'] });
-      res.json({ id: result.lastInsertRowid, email, name, role: 'user' });
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const result = await db.execute({ sql: "INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: [email, hashedPassword, name, 'user'] });
+      const userId = result.lastInsertRowid;
+      const token = jwt.sign({ id: userId.toString(), role: 'user', email }, JWT_SECRET, { expiresIn: '7d' });
+      res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' });
+      res.json({ id: userId, email, name, role: 'user' });
     } catch (err) {
-      // Check if user was just created (race condition on double start)
-      const existing = await db.execute({ sql: "SELECT id, email, name, role FROM users WHERE email = ? AND password = ?", args: [email, password] });
-      if (existing.rows.length > 0) {
-        res.json(existing.rows[0]);
-      } else {
-        res.status(400).json({ error: "Email già registrata" });
-      }
+      res.status(400).json({ error: "Email già registrata" });
     }
   });
 
-  app.get("/api/users", async (req, res) => {
-    const result = await db.execute("SELECT id, name, email, password, role, bio, contract_start, contract_end, experience_years, age FROM users WHERE role = 'user'");
+  app.get("/api/users", async (req: any, res) => {
+    const result = await db.execute("SELECT id, name, email, role, bio, contract_start, contract_end, experience_years, age FROM users WHERE role = 'user'");
     res.json(result.rows);
   });
 
@@ -304,7 +335,7 @@ async function startServer() {
     }
   });
 
-  app.patch("/api/users/:id", async (req, res) => {
+  app.patch("/api/users/:id", async (req: any, res) => {
     const { name, email, bio, contract_start, contract_end, experience_years, age } = req.body;
     try {
       await db.execute({ 
@@ -332,7 +363,7 @@ async function startServer() {
     console.error("Error cleaning up exercises:", err);
   }
 
-  app.delete("/api/users/:id", async (req, res) => {
+  app.delete("/api/users/:id", async (req: any, res) => {
     const plansResult = await db.execute({ sql: "SELECT id FROM plans WHERE user_id = ?", args: [req.params.id] });
     const plans = plansResult.rows as unknown as { id: number }[];
     for (const plan of plans) {
@@ -348,13 +379,13 @@ async function startServer() {
     res.json(result.rows);
   });
 
-  app.post("/api/exercises", async (req, res) => {
+  app.post("/api/exercises", async (req: any, res) => {
     const { name, category, muscle_group } = req.body;
     const result = await db.execute({ sql: "INSERT INTO exercises (name, category, muscle_group) VALUES (?, ?, ?)", args: [name, category, muscle_group] });
     res.json({ id: result.lastInsertRowid, name, category, muscle_group });
   });
 
-  app.get("/api/models", async (req, res) => {
+  app.get("/api/models", async (req: any, res) => {
     const modelsResult = await db.execute("SELECT * FROM models ORDER BY created_at DESC");
     const models = modelsResult.rows;
     const modelsWithItems = await Promise.all(models.map(async (model: any) => {
@@ -364,12 +395,12 @@ async function startServer() {
     res.json(modelsWithItems);
   });
   
-  app.get("/api/models/:id/items", async (req, res) => {
+  app.get("/api/models/:id/items", async (req: any, res) => {
     const items = (await db.execute({ sql: "SELECT * FROM model_items WHERE model_id = ?", args: [req.params.id] })).rows;
     res.json(items);
   });
   
-  app.post("/api/models", async (req, res) => {
+  app.post("/api/models", async (req: any, res) => {
     const { name, description, items } = req.body;
     const modelResult = await db.execute({ sql: "INSERT INTO models (name, description) VALUES (?, ?)", args: [name, description] });
     const modelId = modelResult.lastInsertRowid;
@@ -379,31 +410,32 @@ async function startServer() {
     res.json({ id: modelId });
   });
 
-  app.delete("/api/models/:id", async (req, res) => {
+  app.delete("/api/models/:id", async (req: any, res) => {
     await db.execute({ sql: "DELETE FROM model_items WHERE model_id = ?", args: [req.params.id] });
     await db.execute({ sql: "DELETE FROM models WHERE id = ?", args: [req.params.id] });
     res.json({ success: true });
   });
 
-  app.patch("/api/exercises/:id", async (req, res) => {
+  app.patch("/api/exercises/:id", async (req: any, res) => {
     const { name, category, muscle_group } = req.body;
     await db.execute({ sql: "UPDATE exercises SET name = ?, category = ?, muscle_group = ? WHERE id = ?", args: [name, category, muscle_group, req.params.id] });
     res.json({ success: true });
   });
 
-  app.delete("/api/exercises/:id", async (req, res) => {
+  app.delete("/api/exercises/:id", async (req: any, res) => {
     await db.execute({ sql: "DELETE FROM exercises WHERE id = ?", args: [req.params.id] });
     res.json({ success: true });
   });
 
-  app.delete("/api/plans/:id", async (req, res) => {
+  app.delete("/api/plans/:id", async (req: any, res) => {
     await db.execute({ sql: "DELETE FROM plan_items WHERE plan_id = ?", args: [req.params.id] });
     await db.execute({ sql: "DELETE FROM plans WHERE id = ?", args: [req.params.id] });
     res.json({ success: true });
   });
 
-  app.get("/api/plans/:userId/history", async (req, res) => {
-    const plans = (await db.execute({ sql: "SELECT * FROM plans WHERE user_id = ? ORDER BY created_at DESC", args: [req.params.userId] })).rows;
+  app.get("/api/plans/:userId/history", async (req: any, res) => {
+    const targetId = req.params.userId;
+    const plans = (await db.execute({ sql: "SELECT * FROM plans WHERE user_id = ? ORDER BY created_at DESC", args: [targetId] })).rows;
     const plansWithItems = await Promise.all(plans.map(async (plan: any) => {
       const items = (await db.execute({ sql: "SELECT * FROM plan_items WHERE plan_id = ?", args: [plan.id] })).rows;
       return { ...plan, items };
@@ -411,15 +443,16 @@ async function startServer() {
     res.json(plansWithItems);
   });
 
-  app.get("/api/plans/:userId", async (req, res) => {
-    const result = await db.execute({ sql: "SELECT * FROM plans WHERE user_id = ? ORDER BY created_at DESC LIMIT 1", args: [req.params.userId] });
+  app.get("/api/plans/:userId", async (req: any, res) => {
+    const targetId = req.params.userId;
+    const result = await db.execute({ sql: "SELECT * FROM plans WHERE user_id = ? ORDER BY created_at DESC LIMIT 1", args: [targetId] });
     if (result.rows.length === 0) return res.json(null);
     const plan = result.rows[0] as any;
     const items = (await db.execute({ sql: "SELECT * FROM plan_items WHERE plan_id = ?", args: [plan.id] })).rows;
     res.json({ ...plan, items });
   });
 
-  app.post("/api/plans", async (req, res) => {
+  app.post("/api/plans", async (req: any, res) => {
     const { userId, ptId, items } = req.body;
     const planResult = await db.execute({ sql: "INSERT INTO plans (user_id, pt_id) VALUES (?, ?)", args: [userId, ptId] });
     const planId = planResult.lastInsertRowid;
@@ -429,7 +462,7 @@ async function startServer() {
     res.json({ id: planId });
   });
 
-  app.patch("/api/plan-items/:itemId", async (req, res) => {
+  app.patch("/api/plan-items/:itemId", async (req: any, res) => {
     const { user_notes } = req.body;
     await db.execute({ sql: "UPDATE plan_items SET user_notes = ? WHERE id = ?", args: [user_notes, req.params.itemId] });
     res.json({ success: true });
@@ -441,10 +474,10 @@ async function startServer() {
     res.json(settingsObj);
   });
 
-  app.patch("/api/settings", async (req, res) => {
+  app.patch("/api/settings", async (req: any, res) => {
     const settings = req.body;
     for (const [key, value] of Object.entries(settings)) {
-      await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", args: [key, value] });
+      await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", args: [key, value as any] });
     }
     res.json({ success: true });
   });

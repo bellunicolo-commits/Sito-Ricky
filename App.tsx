@@ -3319,16 +3319,26 @@ const AboutMe = ({ user, theme, settings, onBack, updateSettings }: { user?: Use
   };
 
   return (
-    <div className="relative overflow-hidden flex items-center justify-center p-6 md:p-12" style={customStyles}>
+    <div className="relative overflow-hidden flex items-center justify-center p-6 pt-24 md:p-12" style={customStyles}>
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-accent/10 blur-[150px] rounded-full" />
         <div className="absolute bottom-[-10%] left-[-10%] w-[50%] h-[50%] bg-accent/5 blur-[150px] rounded-full" />
       </div>
 
+      {user?.role === 'pt' && (
+        <div className="absolute top-4 right-4 md:top-8 md:right-8 z-50">
+          <button 
+            onClick={() => setIsEditing(true)}
+            className="bg-accent text-black p-4 rounded-2xl shadow-xl shadow-accent/20 hover:scale-110 transition-all font-black"
+          >
+            <Settings className="w-6 h-6" />
+          </button>
+        </div>
+      )}
+
       <div className={`max-w-7xl w-full grid ${String(settings.about_image_enabled) !== 'false' ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 max-w-4xl mx-auto'} gap-24 sm:gap-12 lg:gap-24 items-center relative z-10`}>
         <motion.div initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }} className="space-y-12">
           <div className="space-y-4">
-            {/* Blue line removed */}
             <h1 
               className="font-display font-black italic uppercase tracking-tighter leading-[0.85] transition-colors duration-500" 
               style={{ 
@@ -3384,16 +3394,6 @@ const AboutMe = ({ user, theme, settings, onBack, updateSettings }: { user?: Use
           </div>
         </motion.div>
 
-        {user?.role === 'pt' && (
-          <div className="absolute top-4 right-4 md:-top-6 md:-right-6 z-50">
-            <button 
-              onClick={() => setIsEditing(true)}
-              className="bg-accent text-black p-4 rounded-2xl shadow-xl shadow-accent/20 hover:scale-110 transition-all font-black"
-            >
-              <Settings className="w-6 h-6" />
-            </button>
-          </div>
-        )}
         {String(settings.about_image_enabled) !== 'false' && (
           <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="relative">
             <div className="relative aspect-square md:aspect-[4/5] lg:aspect-square">
@@ -3563,10 +3563,10 @@ export default function App() {
   }
 
   return (
-    <div className={`${activeTab === 'dashboard' && user.role === 'pt' ? 'h-screen overflow-hidden' : 'min-h-screen pb-24'} flex flex-col transition-colors duration-500 ${theme === 'dark' ? 'bg-black text-white' : 'bg-zinc-50 text-zinc-900'}`}>
+    <div className={`w-full overflow-x-hidden ${activeTab === 'dashboard' && user.role === 'pt' ? 'h-screen overflow-hidden' : 'min-h-screen pb-24'} flex flex-col transition-colors duration-500 ${theme === 'dark' ? 'bg-black text-white' : 'bg-zinc-50 text-zinc-900'}`}>
       {/* Header */}
       <header className={`backdrop-blur-2xl border-b sticky top-0 z-20 transition-colors duration-500 ${theme === 'dark' ? 'bg-black/80 border-white/5' : 'bg-white/80 border-zinc-200'}`}>
-        <div className="max-w-7xl mx-auto px-6 h-28 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-2 sm:px-6 h-28 flex items-center justify-between">
           <div className="flex items-center gap-6">
             <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center shadow-2xl overflow-hidden border transition-colors duration-500 ${theme === 'dark' ? 'bg-zinc-900 border-white/5 shadow-accent/10' : 'bg-white border-zinc-200 shadow-zinc-200'}`}>
               <img 

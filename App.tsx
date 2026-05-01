@@ -35,7 +35,8 @@ import {
   ShieldCheck,
   TrendingUp,
   AlertCircle,
-  Home
+  Home,
+  Menu
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
@@ -330,7 +331,7 @@ const ResetPassword = () => {
   );
 };
 
-const Chat = ({ currentUser, otherUser, onBack, theme }: { currentUser: User, otherUser: User, onBack: () => void, theme?: 'dark' | 'light' }) => {
+const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onRead }: { currentUser: User, otherUser: User, onBack: () => void, theme?: 'dark' | 'light', newMessagesCount?: number, onRead?: () => void }) => {
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -346,6 +347,8 @@ const Chat = ({ currentUser, otherUser, onBack, theme }: { currentUser: User, ot
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ receiverId: currentUser.id, senderId: otherUser.id })
+        }).then(() => {
+          if (onRead) onRead();
         });
       });
   };
@@ -395,18 +398,27 @@ const Chat = ({ currentUser, otherUser, onBack, theme }: { currentUser: User, ot
       
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-hide">
         {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.sender_id === currentUser.id ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] p-4 rounded-2xl ${
-              m.sender_id === currentUser.id 
-                ? 'bg-accent text-black rounded-tr-none' 
-                : (theme === 'light' ? 'bg-zinc-200 text-zinc-900 rounded-tl-none' : 'bg-zinc-800 text-white rounded-tl-none')
-            }`}>
-              <p className="text-sm font-bold">{m.content}</p>
-              <p className={`text-[10px] sm:text-[8px] mt-1 font-black uppercase opacity-40 ${m.sender_id === currentUser.id ? 'text-black' : (theme === 'light' ? 'text-zinc-900' : 'text-white')}`}>
-                {new Date(m.created_at).toLocaleDateString([], { day: '2-digit', month: '2-digit' })} • {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </p>
+          <React.Fragment key={i}>
+            {newMessagesCount > 0 && i === messages.length - newMessagesCount && (
+              <div className="flex items-center gap-4 py-4">
+                <div className="h-px flex-1 bg-accent/20" />
+                <span className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">{newMessagesCount} nuovi messaggi</span>
+                <div className="h-px flex-1 bg-accent/20" />
+              </div>
+            )}
+            <div className={`flex ${m.sender_id === currentUser.id ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[80%] p-4 rounded-2xl ${
+                m.sender_id === currentUser.id 
+                  ? 'bg-accent text-black rounded-tr-none' 
+                  : (theme === 'light' ? 'bg-zinc-200 text-zinc-900 rounded-tl-none' : 'bg-zinc-800 text-white rounded-tl-none')
+              }`}>
+                <p className="text-sm font-bold">{m.content}</p>
+                <p className={`text-[10px] sm:text-[8px] mt-1 font-black uppercase opacity-40 ${m.sender_id === currentUser.id ? 'text-black' : (theme === 'light' ? 'text-zinc-900' : 'text-white')}`}>
+                  {new Date(m.created_at).toLocaleDateString([], { day: '2-digit', month: '2-digit' })} • {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </div>
             </div>
-          </div>
+          </React.Fragment>
         ))}
       </div>
 
@@ -422,6 +434,81 @@ const Chat = ({ currentUser, otherUser, onBack, theme }: { currentUser: User, ot
           <Send className="w-6 h-6" />
         </button>
       </form>
+    </div>
+  );
+};
+
+const CoachInbox = ({ unreadNotifications, onSelectAthlete, onBack, theme }: { 
+  unreadNotifications: any[], 
+  onSelectAthlete: (senderId: number) => void,
+  onBack: () => void,
+  theme?: 'dark' | 'light' 
+}) => {
+  const grouped = useMemo(() => {
+    return unreadNotifications.reduce((acc, n) => {
+      if (!acc[n.sender_id]) {
+        acc[n.sender_id] = {
+          sender_id: n.sender_id,
+          sender_name: n.sender_name,
+          last_message: n.content,
+          count: 0,
+          created_at: n.created_at
+        };
+      }
+      acc[n.sender_id].count++;
+      if (new Date(n.created_at) > new Date(acc[n.sender_id].created_at)) {
+        acc[n.sender_id].last_message = n.content;
+        acc[n.sender_id].created_at = n.created_at;
+      }
+      return acc;
+    }, {} as Record<number, any>);
+  }, [unreadNotifications]);
+
+  const items = Object.values(grouped).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  return (
+    <div className="space-y-8">
+      <div className="flex items-center gap-6">
+        <button onClick={onBack} className={`w-14 h-14 flex items-center justify-center border rounded-2xl hover:shadow-lg transition-all ${theme === 'light' ? 'bg-white border-zinc-200 shadow-zinc-200' : 'bg-zinc-900 border-white/10 shadow-accent/20'}`}>
+          <ArrowLeft className={`w-6 h-6 ${theme === 'dark' ? 'text-accent' : 'text-zinc-900'}`} />
+        </button>
+        <h2 className={`text-4xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Inbox Messaggi</h2>
+      </div>
+
+      <div className="grid gap-4">
+        {items.length === 0 ? (
+          <div className="glass p-20 rounded-[3rem] text-center space-y-4">
+             <div className="w-20 h-20 bg-zinc-900 rounded-3xl flex items-center justify-center mx-auto mb-4 border border-white/5">
+               <Mail className="w-10 h-10 text-zinc-700" />
+             </div>
+             <p className="text-zinc-500 font-bold uppercase tracking-widest text-xs italic">Nessun nuovo messaggio</p>
+          </div>
+        ) : (
+          items.map((item: any) => (
+            <button 
+              key={item.sender_id}
+              onClick={() => onSelectAthlete(item.sender_id)}
+              className="glass p-6 rounded-[2.5rem] flex items-center justify-between group hover:scale-[1.01] transition-all text-left"
+            >
+              <div className="flex items-center gap-6">
+                <div className="w-14 h-14 bg-accent/10 rounded-2xl flex items-center justify-center shrink-0">
+                  <UserIcon className="w-6 h-6 text-accent" />
+                </div>
+                <div>
+                  <h4 className={`text-xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{item.sender_name}</h4>
+                  <p className="text-zinc-500 text-xs font-bold line-clamp-1 italic">"{item.last_message}"</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="bg-accent text-black px-3 py-1 rounded-full text-[10px] font-black shadow-lg shadow-accent/20">
+                  {item.count}
+                </div>
+                <ChevronRight className="w-5 h-5 text-zinc-700 group-hover:text-accent transition-all" />
+              </div>
+            </button>
+          ))
+        )}
+      </div>
     </div>
   );
 };
@@ -548,7 +635,7 @@ const ContactCoach = ({ athleteId, coachId, onBack, theme }: { athleteId: number
   );
 };
 
-const ExerciseLibrary = ({ exercises, onUpdate }: { exercises: Exercise[], onUpdate: () => void }) => {
+const ExerciseLibrary = ({ exercises, onUpdate, theme }: { exercises: Exercise[], onUpdate: () => void, theme?: 'dark' | 'light' }) => {
   const [editingEx, setEditingEx] = useState<Exercise | null>(null);
   const [newName, setNewName] = useState('');
   const [newCategory, setNewCategory] = useState('');
@@ -586,13 +673,13 @@ const ExerciseLibrary = ({ exercises, onUpdate }: { exercises: Exercise[], onUpd
     <div className="space-y-10">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
         <div>
-          <h2 className="text-4xl font-display font-black italic uppercase tracking-tighter leading-none mb-2">Libreria Esercizi</h2>
+          <h2 className={`text-4xl font-display font-black italic uppercase tracking-tighter leading-none mb-2 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Libreria Esercizi</h2>
           <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">Gestisci il tuo database di movimenti</p>
         </div>
         <div className="flex flex-col md:flex-row gap-4 flex-1">
           <div className="relative flex-1">
             <input 
-              className="w-full py-4 pl-8 pr-4 bg-white border border-zinc-100 rounded-2xl text-xs font-bold uppercase tracking-widest outline-none focus:border-accent transition-all"
+              className={`w-full py-4 pl-8 pr-4 border rounded-2xl text-xs font-bold uppercase tracking-widest outline-none focus:border-accent transition-all ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900' : 'bg-zinc-900 border-white/10 text-white'}`}
               placeholder="Cerca per nome o gruppo muscolare..."
               value={libSearch}
               onChange={e => setLibSearch(e.target.value)}
@@ -611,15 +698,15 @@ const ExerciseLibrary = ({ exercises, onUpdate }: { exercises: Exercise[], onUpd
         <motion.div 
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-[2.5rem] border border-zinc-100 shadow-2xl space-y-6"
+          className={`p-8 rounded-[2.5rem] border shadow-2xl space-y-6 ${theme === 'light' ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-white/10'}`}
         >
-          <h3 className="text-xl font-display font-black italic uppercase tracking-tighter">{editingEx ? 'Modifica' : 'Aggiungi'} Esercizio</h3>
+          <h3 className={`text-xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{editingEx ? 'Modifica' : 'Aggiungi'} Esercizio</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1 block ml-1">Nome</label>
               <input 
                 placeholder="Es. Panca Piana" 
-                className="input-field bg-zinc-50 border-zinc-100"
+                className={`input-field border ${theme === 'light' ? 'bg-zinc-50 border-zinc-200 text-zinc-900' : 'bg-zinc-800/50 border-white/5 text-white'}`}
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
               />
@@ -628,7 +715,7 @@ const ExerciseLibrary = ({ exercises, onUpdate }: { exercises: Exercise[], onUpd
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1 block ml-1">Tag / Categoria</label>
               <input 
                 placeholder="Es. Petto, Schiena, Gambe..." 
-                className="input-field bg-zinc-50 border-zinc-100"
+                className={`input-field border ${theme === 'light' ? 'bg-zinc-50 border-zinc-200 text-zinc-900' : 'bg-zinc-800/50 border-white/5 text-white'}`}
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
               />
@@ -637,15 +724,15 @@ const ExerciseLibrary = ({ exercises, onUpdate }: { exercises: Exercise[], onUpd
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1 block ml-1">Gruppo Muscolare</label>
               <input 
                 placeholder="Es. Pettorali, Dorsali..." 
-                className="input-field bg-zinc-50 border-zinc-100"
+                className={`input-field border ${theme === 'light' ? 'bg-zinc-50 border-zinc-200 text-zinc-900' : 'bg-zinc-800/50 border-white/5 text-white'}`}
                 value={newMuscleGroup}
                 onChange={(e) => setNewMuscleGroup(e.target.value)}
               />
             </div>
           </div>
           <div className="flex justify-end gap-3">
-            <button onClick={() => { setIsAdding(false); setEditingEx(null); }} className="px-6 py-3 text-zinc-400 font-bold uppercase tracking-widest text-xs">Annulla</button>
-            <button onClick={handleSave} className="bg-zinc-900 text-white px-8 py-3 rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-zinc-800 transition-all">Salva</button>
+            <button onClick={() => { setIsAdding(false); setEditingEx(null); }} className={`px-6 py-3 font-bold uppercase tracking-widest text-xs ${theme === 'light' ? 'text-zinc-500 hover:text-zinc-900' : 'text-zinc-400 hover:text-white'}`}>Annulla</button>
+            <button onClick={handleSave} className={`${theme === 'light' ? 'bg-zinc-900 text-white hover:bg-black' : 'bg-white text-black hover:bg-zinc-200'} px-8 py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all`}>Salva</button>
           </div>
         </motion.div>
       )}
@@ -661,26 +748,28 @@ const ExerciseLibrary = ({ exercises, onUpdate }: { exercises: Exercise[], onUpd
           return (
             <div key={cat} className="space-y-6">
             <div className="flex items-center gap-4">
-              <span className="px-4 py-1.5 bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest rounded-full">{cat}</span>
-              <div className="h-px flex-1 bg-zinc-100" />
+              <span className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-full ${theme === 'light' ? 'bg-zinc-900 text-white' : 'bg-white text-black'}`}>{cat}</span>
+              <div className={`h-px flex-1 ${theme === 'light' ? 'bg-zinc-200' : 'bg-white/5'}`} />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {catExercises.map(ex => (
-                <div key={ex.id} className="bg-white p-6 rounded-2xl border border-zinc-100 flex justify-between items-center group hover:shadow-md transition-all">
+                <div key={ex.id} className={`p-6 rounded-2xl border flex justify-between items-center group hover:shadow-md transition-all ${theme === 'light' ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-white/5'}`}>
                   <div>
-                    <p className="font-black italic uppercase tracking-tighter text-lg">{ex.name}</p>
+                    <p className={`font-black italic uppercase tracking-tighter text-lg ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{ex.name}</p>
                     {ex.muscle_group && <p className="text-[8px] font-black text-accent uppercase tracking-widest">{ex.muscle_group}</p>}
                   </div>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex gap-1 transition-opacity">
                     <button 
                       onClick={() => { setEditingEx(ex); setNewName(ex.name); setNewCategory(ex.category); setNewMuscleGroup(ex.muscle_group || ''); setIsAdding(false); }}
-                      className="p-2 text-zinc-300 hover:text-accent transition-colors"
+                      className={`p-2 rounded-xl transition-all ${theme === 'light' ? 'text-zinc-400 hover:text-blue-500 hover:bg-blue-500/5' : 'text-zinc-500 hover:text-accent hover:bg-accent/5'}`}
+                      title="Modifica"
                     >
                       <Edit3 className="w-4 h-4" />
                     </button>
                     <button 
                       onClick={() => handleDelete(ex.id)}
-                      className="p-2 text-zinc-300 hover:text-red-500 transition-colors"
+                      className={`p-2 rounded-xl transition-all ${theme === 'light' ? 'text-zinc-400 hover:text-red-600 hover:bg-red-50' : 'text-zinc-500 hover:text-red-500 hover:bg-red-500/5'}`}
+                      title="Elimina"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -779,12 +868,12 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
             <button onClick={() => setPreviewMode(false)} className="flex items-center gap-2 text-accent font-black uppercase tracking-widest text-xs">
               <ArrowLeft className="w-5 h-5" /> Torna all'Editor
             </button>
-            <h2 className="text-3xl font-display font-black italic uppercase tracking-tighter text-white">Anteprima Modello</h2>
+            <h2 className={`text-3xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Anteprima Modello</h2>
           </div>
-          <div className="glass p-12 rounded-[4rem] space-y-12">
+          <div className={`p-12 rounded-[4rem] space-y-12 border ${theme === 'light' ? 'bg-white border-zinc-200 shadow-xl' : 'glass border-white/10'}`}>
             <div>
               <h1 className="text-5xl font-display font-black italic uppercase tracking-tighter text-accent mb-4">{newName}</h1>
-              <p className="text-zinc-400 font-bold text-xl italic">{newDesc}</p>
+              <p className={`font-bold text-xl italic ${theme === 'light' ? 'text-zinc-500' : 'text-zinc-400'}`}>{newDesc}</p>
             </div>
             {(Object.entries(modelItems.reduce((acc, item) => {
               const day = item.day || 'Giorno A';
@@ -796,8 +885,8 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
                 <h3 className="text-2xl font-display font-black italic uppercase text-accent border-b border-white/5 pb-2">{day}</h3>
                 <div className="grid gap-4">
                   {items.map((item, i) => (
-                    <div key={i} className="flex justify-between items-center p-4 bg-white/5 rounded-2xl">
-                      <span className="font-bold text-lg text-white uppercase italic">{item.exercise_name}</span>
+                    <div key={i} className={`flex justify-between items-center p-4 rounded-2xl border ${theme === 'light' ? 'bg-zinc-50 border-zinc-100' : 'bg-white/5 border-white/5'}`}>
+                      <span className={`font-bold text-lg uppercase italic ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{item.exercise_name}</span>
                       <span className="text-accent font-black tracking-tighter">{item.sets} x {item.reps}</span>
                     </div>
                   ))}
@@ -1043,9 +1132,9 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
             <div className="w-3 h-3 rounded-full bg-accent animate-pulse" />
           </div>
         </div>
-        <div className="glass p-12 rounded-[4rem] border-accent/20">
-          <div className="mb-12 border-b border-white/10 pb-10">
-            <h2 className="text-6xl font-display font-black italic uppercase tracking-tighter text-white mb-4">{viewingModel.name}</h2>
+        <div className={`p-12 rounded-[4rem] border ${theme === 'light' ? 'bg-white border-zinc-200 shadow-2xl' : 'glass border-accent/20'}`}>
+          <div className={`mb-12 border-b pb-10 ${theme === 'light' ? 'border-zinc-100' : 'border-white/10'}`}>
+            <h2 className={`text-6xl font-display font-black italic uppercase tracking-tighter mb-4 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{viewingModel.name}</h2>
             <p className="text-zinc-400 font-bold text-xl italic max-w-2xl leading-relaxed">{viewingModel.description || 'Nessuna descrizione'}</p>
           </div>
           <div className="space-y-12">
@@ -1062,10 +1151,10 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
                 </div>
                 <div className="grid gap-6">
                   {items.map((item, i) => (
-                    <div key={i} className="glass p-8 rounded-[3rem] border-white/5 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                    <div key={i} className={`p-8 rounded-[3rem] border flex flex-col md:flex-row justify-between items-start md:items-center gap-6 ${theme === 'light' ? 'bg-zinc-50 border-zinc-100' : 'glass border-white/5'}`}>
                       <div>
                         <span className="text-[10px] font-black text-accent uppercase tracking-widest block mb-1">{item.category}</span>
-                        <h4 className="text-3xl font-display font-black italic uppercase text-white">{item.exercise_name}</h4>
+                        <h4 className={`text-3xl font-display font-black italic uppercase ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{item.exercise_name}</h4>
                       </div>
                       <div className="flex flex-col items-end">
                         <span className="text-3xl font-black italic text-accent">{item.sets} x {item.reps}</span>
@@ -1125,14 +1214,14 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
               <div className="flex items-center gap-3">
                 <button 
                   onClick={() => setIsCreating(m)}
-                  className="w-10 h-10 rounded-xl bg-zinc-800 text-accent flex items-center justify-center hover:bg-accent hover:text-black transition-all shadow-lg"
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-lg ${theme === 'light' ? 'bg-zinc-100 text-zinc-900 hover:bg-accent hover:text-black' : 'bg-zinc-800 text-accent hover:bg-accent hover:text-black'}`}
                   title="Modifica Modello"
                 >
                   <Edit3 className="w-5 h-5" />
                 </button>
                 <button 
                   onClick={() => setViewingModel(m)}
-                  className="w-10 h-10 rounded-xl bg-zinc-800 text-accent flex items-center justify-center hover:bg-accent hover:text-black transition-all shadow-lg"
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-lg ${theme === 'light' ? 'bg-zinc-100 text-zinc-900 hover:bg-accent hover:text-black' : 'bg-zinc-800 text-accent hover:bg-accent hover:text-black'}`}
                   title="Visualizza Modello"
                 >
                   <Eye className="w-5 h-5" />
@@ -1872,9 +1961,11 @@ const PTHome = ({ user, theme, onAthleteClick, onNotificationsClick }: { user: U
                       <div className={`w-14 h-14 rounded-[1.5rem] flex items-center justify-center font-black text-2xl italic shrink-0 ${theme === 'dark' ? 'bg-zinc-800 text-accent' : 'bg-zinc-100 text-zinc-900'}`}>
                         {athlete.name.charAt(0)}
                       </div>
-                      <h4 className={`text-xl font-display font-black italic uppercase tracking-tighter leading-none group-hover:text-accent transition-colors ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{athlete.name}</h4>
+                      <div className="flex flex-col">
+                        <h4 className={`text-xl font-display font-black italic uppercase tracking-tighter leading-none group-hover:text-accent transition-colors ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{athlete.name}</h4>
+                        <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mt-2">Inserito il {joinedDate}</span>
+                      </div>
                     </div>
-                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest whitespace-nowrap">Inserito il {joinedDate}</span>
                   </button>
                 );
               })}
@@ -1904,7 +1995,7 @@ const PTHome = ({ user, theme, onAthleteClick, onNotificationsClick }: { user: U
 };
 
 
-const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, refreshExercises, refreshModels, selectedClient, setSelectedClient, initialView, onViewHandled }: { 
+const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, refreshExercises, refreshModels, selectedClient, setSelectedClient, initialView, onViewHandled, newMessagesCount, onRead }: { 
   pt: User, 
   theme: 'dark' | 'light', 
   clients: User[], 
@@ -1916,7 +2007,9 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
   selectedClient: User | null,
   setSelectedClient: (c: User | null) => void,
   initialView?: 'editor' | 'chat' | null,
-  onViewHandled?: () => void
+  onViewHandled?: () => void,
+  newMessagesCount?: number,
+  onRead?: () => void
 }) => {
 
   const [newPlanItems, setNewPlanItems] = useState<PlanItem[]>([]);
@@ -2106,23 +2199,23 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
       } else {
         setView('editor');
       }
-    }} theme={theme} />;
+    }} theme={theme} newMessagesCount={newMessagesCount} onRead={onRead} />;
   }
 
   if (view === 'library') {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 pb-40 overflow-y-auto h-full">
         <button onClick={handleBackFromInfo} className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900 font-bold uppercase tracking-widest text-xs">
           <ArrowLeft className="w-4 h-4" /> Torna alla Dashboard
         </button>
-        <ExerciseLibrary exercises={exercises} onUpdate={refreshExercises} />
+        <ExerciseLibrary exercises={exercises} onUpdate={refreshExercises} theme={theme} />
       </div>
     );
   }
 
   if (view === 'models') {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 pb-40 overflow-y-auto h-full">
         <button onClick={handleBackFromInfo} className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900 font-bold uppercase tracking-widest text-xs">
           <ArrowLeft className="w-4 h-4" /> Torna alla Dashboard
         </button>
@@ -2965,6 +3058,8 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
   };
 
   const [managingNotesItemId, setManagingNotesItemId] = useState<number | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [editingNoteIndex, setEditingNoteIndex] = useState<number | null>(null);
 
   const manageNotes = (itemId: number) => {
     setManagingNotesItemId(itemId);
@@ -2982,21 +3077,25 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
     const item = plan?.items.find(i => i.id === itemId);
     if (!item || !item.user_notes) return;
     const notes = item.user_notes.split('\n').filter(Boolean);
-    const newNote = prompt("Modifica nota:", notes[noteIndex]);
-    if (newNote !== null) {
-      notes[noteIndex] = newNote;
-      updateNote(itemId, notes.join('\n'));
-    }
+    setNoteDraft(notes[noteIndex]);
+    setEditingNoteIndex(noteIndex);
   };
 
-  const addNote = (itemId: number) => {
-    const newNote = prompt("Aggiungi una nota (carichi, sensazioni...):");
-    if (newNote) {
-      const item = plan?.items.find(i => i.id === itemId);
-      const existingNotes = item?.user_notes || "";
-      const updatedNotes = existingNotes ? `${existingNotes}\n${newNote}` : newNote;
-      updateNote(itemId, updatedNotes);
+  const handleSaveNote = () => {
+    if (!noteDraft.trim() || managingNotesItemId === null) return;
+    const item = plan?.items.find(i => i.id === managingNotesItemId);
+    if (!item) return;
+    const notes = item.user_notes ? item.user_notes.split('\n').filter(Boolean) : [];
+    
+    if (editingNoteIndex !== null) {
+      notes[editingNoteIndex] = noteDraft;
+    } else {
+      notes.push(noteDraft);
     }
+    
+    updateNote(managingNotesItemId, notes.join('\n'));
+    setNoteDraft("");
+    setEditingNoteIndex(null);
   };
 
 
@@ -3105,16 +3204,6 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
         </div>
       </div>
 
-      {user.bio && (
-        <motion.div 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass p-8 rounded-[3rem] border-accent/20"
-        >
-          <p className="text-[10px] font-black text-accent uppercase tracking-[0.3em] mb-3">Note del Coach / Bio</p>
-          <p className="text-zinc-300 font-bold italic text-lg leading-relaxed">{user.bio}</p>
-        </motion.div>
-      )}
 
       {!plan ? (
         <div className="glass p-24 rounded-[4rem] text-center">
@@ -3148,43 +3237,45 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
                 {isExpanded && (
                   <div className="grid gap-8">
                     {items.map((item) => (
-                      <motion.div 
-                        key={item.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="glass p-6 sm:p-10 rounded-[3.5rem] relative overflow-hidden group"
-                      >
-                        <div className="flex flex-col md:flex-row gap-10">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-4 mb-3">
-                              <span className="w-3 h-3 rounded-full bg-accent shadow-lg shadow-accent/50" />
-                              <h4 className={`text-2xl sm:text-3xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{item.exercise_name}</h4>
-                              <button 
-                                onClick={() => manageNotes(item.id!)}
-                                className={`p-2 rounded-xl transition-all ${theme === 'dark' ? 'text-accent hover:bg-white/5' : 'text-zinc-900 hover:bg-zinc-100'}`}
-                                title="Gestisci Note"
-                              >
-                                <FileText className="w-6 h-6" />
-                              </button>
-
-                            </div>
-                            <p className="text-xl sm:text-2xl font-black italic text-zinc-500 mb-6 ml-7">
-                              {item.sets} x {item.reps} {item.pt_notes && <span className="text-accent/60 ml-2">({item.pt_notes})</span>}
-                            </p>
-                            
-                            {item.user_notes && (
-                              <ul className="ml-7 space-y-2 mb-8">
-                                {item.user_notes.split('\n').filter(Boolean).map((note, idx) => (
-                                  <li key={idx} className="text-lg sm:text-xl font-bold italic text-zinc-400 flex items-start gap-4">
-                                    <span className="text-accent mt-1 select-none">•</span>
-                                    <span className="flex-1">{note}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
+                    <motion.div 
+                      key={item.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="glass p-6 sm:p-8 rounded-[2.5rem] relative overflow-hidden group min-h-[160px] flex flex-col justify-center"
+                    >
+                      <div className="flex items-start justify-between w-full mb-4">
+                        <div className="flex-1 min-w-0 flex items-start gap-4">
+                          <span className="w-3 h-3 rounded-full bg-accent shadow-lg shadow-accent/50 mt-3.5 shrink-0" />
+                          <h4 className={`text-2xl sm:text-3xl font-display font-black italic uppercase tracking-tighter break-words overflow-hidden flex-1 min-w-0 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>
+                            {item.exercise_name}
+                          </h4>
                         </div>
-                      </motion.div>
+                        <button 
+                          onClick={() => manageNotes(item.id!)}
+                          className={`p-2 rounded-xl transition-all shrink-0 ml-4 ${theme === 'dark' ? 'text-accent hover:bg-white/5' : 'text-zinc-900 hover:bg-zinc-100'}`}
+                          title="Gestisci Note"
+                        >
+                          <FileText className="w-6 h-6" />
+                        </button>
+                      </div>
+
+                      <div className="flex flex-col items-center justify-center text-center w-full">
+                        <p className="text-xl sm:text-2xl font-black italic text-zinc-500 mb-4">
+                          {item.sets} x {item.reps} {item.pt_notes && <span className="text-accent/60 ml-2">({item.pt_notes})</span>}
+                        </p>
+                        
+                        {item.user_notes && (
+                          <ul className="space-y-1">
+                            {item.user_notes.split('\n').filter(Boolean).map((note, idx) => (
+                              <li key={idx} className="text-lg sm:text-xl font-bold italic text-zinc-400 flex items-start gap-2 justify-center">
+                                <span className="text-accent mt-1 select-none">•</span>
+                                <span>{note}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </motion.div>
                     ))}
                   </div>
                 )}
@@ -3200,19 +3291,7 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
             <ul className="space-y-6 text-zinc-500 font-bold text-lg">
               <li className="flex gap-4">
                 <span className="text-accent font-black">•</span>
-                <span>La dicitura è serie x ripetizioni.</span>
-              </li>
-              <li className="flex gap-4">
-                <span className="text-accent font-black">•</span>
-                <span>Se non indicato diversamente i tempi di recupero sono circa 1:30.</span>
-              </li>
-              <li className="flex gap-4">
-                <span className="text-accent font-black">•</span>
-                <span>Le progressioni vanno svolte tra le settimane, non tra un giorno e l'altro della stessa settimana.</span>
-              </li>
-              <li className="flex gap-4">
-                <span className="text-accent font-black">•</span>
-                <span>Quando un max è davvero un max: quando non ce la fai più a fare il movimento concentrico dell'esercizio.</span>
+                <span>Le note evidenziate in blu sono inserite dal coach e non possono essere modificate dall'atleta. Per aggiungere nuove note o modificarle, è necessario cliccare sull'icona di modifica situata nell'angolo del riquadro dell'esercizio.</span>
               </li>
             </ul>
           </div>
@@ -3243,14 +3322,14 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
             >
               <div className="flex justify-between items-center mb-10">
                 <div>
-                  <h3 className="text-3xl font-display font-black italic uppercase tracking-tighter text-white">Gestisci Note</h3>
+                  <h3 className={`text-3xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Gestisci Note</h3>
                   <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px] mt-1">
                     {plan?.items.find(i => i.id === managingNotesItemId)?.exercise_name}
                   </p>
                 </div>
                 <button 
                   onClick={() => setManagingNotesItemId(null)} 
-                  className="p-3 hover:bg-white/5 rounded-2xl transition-all text-zinc-500 hover:text-white"
+                  className={`p-3 rounded-2xl transition-all ${theme === 'light' ? 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100' : 'text-zinc-500 hover:text-white hover:bg-white/5'}`}
                 >
                   <X className="w-6 h-6" />
                 </button>
@@ -3258,18 +3337,18 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
 
               <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-2 scrollbar-hide py-1">
                 {plan?.items.find(i => i.id === managingNotesItemId)?.user_notes?.split('\n').filter(Boolean).map((note, idx) => (
-                  <div key={idx} className="p-5 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-between group">
-                    <p className="text-zinc-300 font-bold italic flex-1 pr-4">{note}</p>
+                  <div key={idx} className={`p-5 rounded-3xl flex items-center justify-between group ${theme === 'light' ? 'bg-zinc-100 border border-zinc-200' : 'bg-white/5 border border-white/10'}`}>
+                    <p className={`font-bold italic flex-1 pr-4 ${theme === 'light' ? 'text-zinc-800' : 'text-zinc-300'}`}>{note}</p>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
                         onClick={() => editNote(managingNotesItemId, idx)}
-                        className="p-2 text-zinc-500 hover:text-accent transition-colors"
+                        className={`p-2 transition-colors ${theme === 'light' ? 'text-zinc-400 hover:text-accent' : 'text-zinc-500 hover:text-accent'}`}
                       >
                         <Edit3 className="w-4 h-4" />
                       </button>
                       <button 
                         onClick={() => deleteNote(managingNotesItemId, idx)}
-                        className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
+                        className={`p-2 transition-colors ${theme === 'light' ? 'text-zinc-400 hover:text-red-500' : 'text-zinc-500 hover:text-red-500'}`}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -3277,17 +3356,37 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
                   </div>
                 ))}
                 {(!plan?.items.find(i => i.id === managingNotesItemId)?.user_notes || plan?.items.find(i => i.id === managingNotesItemId)?.user_notes?.trim() === '') && (
-                  <p className="text-center py-10 text-zinc-500 font-bold uppercase tracking-widest text-[10px]">Nessuna nota per questo esercizio</p>
+                  <p className={`text-center py-10 font-bold uppercase tracking-widest text-[10px] ${theme === 'light' ? 'text-zinc-400' : 'text-zinc-500'}`}>Nessuna nota per questo esercizio</p>
                 )}
               </div>
 
-              <button 
-                onClick={() => addNote(managingNotesItemId)}
-                className="btn-primary w-full py-5 mt-8 flex items-center justify-center gap-3"
-              >
-                <Plus className="w-5 h-5" />
-                Aggiungi Nota
-              </button>
+              <div className="mt-8 space-y-4">
+                <textarea 
+                  className={`input-field min-h-[100px] py-4 italic font-bold text-sm ${theme === 'light' ? 'text-zinc-900 bg-white border-zinc-200 placeholder-zinc-400' : ''}`} 
+                  placeholder="Scrivi una nota (es. carichi, sensazioni...)"
+                  value={noteDraft}
+                  onChange={(e) => setNoteDraft(e.target.value)}
+                />
+                <div className="flex gap-3">
+                  {editingNoteIndex !== null && (
+                    <button 
+                      onClick={() => { setNoteDraft(''); setEditingNoteIndex(null); }}
+                      className={`flex-1 py-4 rounded-2xl border font-black uppercase tracking-widest text-[10px] transition-all ${theme === 'light' ? 'border-zinc-200 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900' : 'border-white/10 text-zinc-500 hover:bg-white/5 hover:text-white'}`}
+                    >
+                      Annulla
+                    </button>
+                  )}
+                  <button 
+                    onClick={handleSaveNote}
+                    className="btn-primary flex-1 py-4 flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span className="text-[10px] font-black uppercase tracking-widest">
+                      {editingNoteIndex !== null ? 'Aggiorna' : 'Aggiungi'} Nota
+                    </span>
+                  </button>
+                </div>
+              </div>
             </motion.div>
           </div>
         )}
@@ -3319,16 +3418,26 @@ const AboutMe = ({ user, theme, settings, onBack, updateSettings }: { user?: Use
   };
 
   return (
-    <div className="relative overflow-hidden flex items-center justify-center p-6 md:p-12" style={customStyles}>
+    <div className="relative overflow-hidden flex items-center justify-center p-6 pt-24 md:p-12" style={customStyles}>
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-accent/10 blur-[150px] rounded-full" />
         <div className="absolute bottom-[-10%] left-[-10%] w-[50%] h-[50%] bg-accent/5 blur-[150px] rounded-full" />
       </div>
 
+      {user?.role === 'pt' && (
+        <div className="absolute top-4 right-4 md:top-8 md:right-8 z-50">
+          <button 
+            onClick={() => setIsEditing(true)}
+            className="bg-accent text-black p-4 rounded-2xl shadow-xl shadow-accent/20 hover:scale-110 transition-all font-black"
+          >
+            <Settings className="w-6 h-6" />
+          </button>
+        </div>
+      )}
+
       <div className={`max-w-7xl w-full grid ${String(settings.about_image_enabled) !== 'false' ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 max-w-4xl mx-auto'} gap-24 sm:gap-12 lg:gap-24 items-center relative z-10`}>
         <motion.div initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }} className="space-y-12">
           <div className="space-y-4">
-            {/* Blue line removed */}
             <h1 
               className="font-display font-black italic uppercase tracking-tighter leading-[0.85] transition-colors duration-500" 
               style={{ 
@@ -3384,16 +3493,6 @@ const AboutMe = ({ user, theme, settings, onBack, updateSettings }: { user?: Use
           </div>
         </motion.div>
 
-        {user?.role === 'pt' && (
-          <div className="absolute top-4 right-4 md:-top-6 md:-right-6 z-50">
-            <button 
-              onClick={() => setIsEditing(true)}
-              className="bg-accent text-black p-4 rounded-2xl shadow-xl shadow-accent/20 hover:scale-110 transition-all font-black"
-            >
-              <Settings className="w-6 h-6" />
-            </button>
-          </div>
-        )}
         {String(settings.about_image_enabled) !== 'false' && (
           <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="relative">
             <div className="relative aspect-square md:aspect-[4/5] lg:aspect-square">
@@ -3491,13 +3590,19 @@ export default function App() {
   const [ptTargetView, setPtTargetView] = useState<'editor' | 'chat' | null>(null);
   const [coach, setCoach] = useState<User | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadNotifications, setUnreadNotifications] = useState<any[]>([]);
+  const [chatDividerCount, setChatDividerCount] = useState(0);
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
 
   const fetchUnread = async () => {
     if (!user) return;
     try {
       const res = await fetch(`/api/notifications/${user.id}`);
       const data = await res.json();
-      if (Array.isArray(data)) setUnreadCount(data.length);
+      if (Array.isArray(data)) {
+        setUnreadCount(data.length);
+        setUnreadNotifications(data);
+      }
     } catch (err) {
       console.error("Error fetching unread:", err);
     }
@@ -3545,6 +3650,23 @@ export default function App() {
     localStorage.setItem('fitplan_user', JSON.stringify(u));
   };
 
+  const handleChatClick = () => {
+    if (user?.role === 'pt') {
+      setActiveTab('notifications');
+    } else {
+      // Athlete logic
+      if (unreadCount > 0) {
+        setChatDividerCount(unreadCount);
+        setUnreadCount(0);
+        setUnreadNotifications([]);
+      } else {
+        setChatDividerCount(0);
+      }
+      setActiveTab('chat');
+    }
+    setIsHeaderMenuOpen(false);
+  };
+
   const handleLogout = () => {
     setUser(null);
     localStorage.removeItem('fitplan_user');
@@ -3563,10 +3685,10 @@ export default function App() {
   }
 
   return (
-    <div className={`${activeTab === 'dashboard' && user.role === 'pt' ? 'h-screen overflow-hidden' : 'min-h-screen pb-24'} flex flex-col transition-colors duration-500 ${theme === 'dark' ? 'bg-black text-white' : 'bg-zinc-50 text-zinc-900'}`}>
+    <div className={`w-full overflow-x-hidden ${activeTab === 'dashboard' && user.role === 'pt' ? 'lg:h-screen lg:overflow-hidden min-h-screen pb-32' : 'min-h-screen pb-24'} flex flex-col transition-colors duration-500 ${theme === 'dark' ? 'bg-black text-white' : 'bg-zinc-50 text-zinc-900'}`}>
       {/* Header */}
       <header className={`backdrop-blur-2xl border-b sticky top-0 z-20 transition-colors duration-500 ${theme === 'dark' ? 'bg-black/80 border-white/5' : 'bg-white/80 border-zinc-200'}`}>
-        <div className="max-w-7xl mx-auto px-6 h-28 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-2 sm:px-6 h-28 flex items-center justify-between">
           <div className="flex items-center gap-6">
             <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center shadow-2xl overflow-hidden border transition-colors duration-500 ${theme === 'dark' ? 'bg-zinc-900 border-white/5 shadow-accent/10' : 'bg-white border-zinc-200 shadow-zinc-200'}`}>
               <img 
@@ -3621,56 +3743,84 @@ export default function App() {
             </button>
           </nav>
 
-          <div className="flex items-center gap-5">
-            <button 
-              onClick={() => setActiveTab('notifications')}
-              className={`w-14 h-14 flex items-center justify-center rounded-2xl transition-all border relative ${activeTab === 'notifications' ? 'bg-accent border-accent text-black' : (theme === 'dark' ? 'bg-zinc-900 text-accent border-white/5 hover:bg-zinc-800' : 'bg-white text-zinc-900 border-zinc-200 hover:bg-zinc-100')}`}
-              title="Notifiche"
-            >
-              <Bell className="w-6 h-6" />
-              {unreadCount > 0 && (
-                <div className="absolute -top-1 -left-1 w-6 h-6 bg-accent rounded-full flex items-center justify-center text-[10px] font-black text-black shadow-lg shadow-accent/20 border-2 border-black">
-                  {unreadCount}
-                </div>
-              )}
-            </button>
-            <button 
-              onClick={() => setActiveTab('chat')}
-              className={`w-14 h-14 flex items-center justify-center rounded-2xl transition-all border relative ${user.role === 'user' ? 'hidden md:flex' : 'flex'} ${activeTab === 'chat' ? 'bg-accent border-accent text-black' : (theme === 'dark' ? 'bg-zinc-900 text-accent border-white/5 hover:bg-zinc-800' : 'bg-white text-zinc-900 border-zinc-200 hover:bg-zinc-100')}`}
-              title="Chat"
-            >
-              <MessageSquare className="w-6 h-6" />
-              {unreadCount > 0 && (
-                <div className="absolute -top-1 -right-1 w-6 h-6 bg-accent rounded-full flex items-center justify-center text-[10px] font-black text-black shadow-lg shadow-accent/20 border-2 border-black">
-                  {unreadCount}
-                </div>
-              )}
-            </button>
-
-            <button 
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className={`w-14 h-14 flex items-center justify-center rounded-2xl transition-all border ${theme === 'dark' ? 'bg-zinc-900 text-accent border-white/5 hover:bg-zinc-800' : 'bg-white text-zinc-900 border-zinc-200 hover:bg-zinc-50'}`}
-              title="Cambia Tema"
-            >
-              {theme === 'dark' ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}
-            </button>
+          <div className="flex items-center gap-5 relative">
             <div className="hidden md:block text-right">
               <p className={`text-lg font-black italic uppercase tracking-tighter transition-colors duration-500 ${theme === 'dark' ? 'text-white' : 'text-zinc-900'}`}>{user.name}</p>
               <p className="text-[10px] font-black text-accent uppercase tracking-widest">{user.role === 'pt' ? 'Coach' : 'Atleta'}</p>
             </div>
-            <button 
-              onClick={handleLogout}
-              className={`w-14 h-14 flex items-center justify-center rounded-2xl transition-all border ${theme === 'dark' ? 'bg-zinc-900 text-accent border-white/5 hover:bg-zinc-800' : 'bg-white text-zinc-900 border-zinc-200 hover:bg-zinc-50'}`}
-              title="Logout"
-            >
-              <LogOut className="w-6 h-6 hover:text-red-500 transition-colors" />
-            </button>
+
+            <div className="relative">
+              <button 
+                onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)}
+                className={`w-14 h-14 flex items-center justify-center rounded-2xl transition-all border ${isHeaderMenuOpen ? 'bg-accent border-accent text-black' : (theme === 'dark' ? 'bg-zinc-900 text-accent border-white/5 hover:bg-zinc-800' : 'bg-white text-zinc-900 border-zinc-200 hover:bg-zinc-100')}`}
+                title="Menu"
+              >
+                <Menu className="w-6 h-6" />
+                {unreadCount > 0 && (
+                  <div className="absolute -top-1 -right-1 w-6 h-6 bg-accent rounded-full flex items-center justify-center text-[10px] font-black text-black shadow-lg shadow-accent/20 border-2 border-black">
+                    {unreadCount}
+                  </div>
+                )}
+              </button>
+
+              <AnimatePresence>
+                {isHeaderMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className={`absolute right-0 mt-4 w-64 glass rounded-[2rem] shadow-2xl p-4 z-50 border transition-colors duration-500 ${theme === 'dark' ? 'bg-black/95 border-white/10' : 'bg-white/95 border-zinc-200'}`}
+                  >
+                    <div className="flex flex-col gap-2">
+                      {!(user.role === 'user') && (
+                        <button 
+                          onClick={handleChatClick}
+                          className={`flex items-center gap-4 p-4 rounded-xl transition-all ${activeTab === 'notifications' ? 'bg-accent text-black' : (theme === 'dark' ? 'hover:bg-white/5 text-zinc-400 hover:text-white' : 'hover:bg-zinc-100 text-zinc-600 hover:text-zinc-900')}`}
+                        >
+                          <Mail className="w-5 h-5" />
+                          <span className="text-[10px] font-black uppercase tracking-widest">Inbox</span>
+                          {unreadCount > 0 && <span className="ml-auto bg-accent text-black px-2 py-0.5 rounded-full text-[8px] font-black">{unreadCount}</span>}
+                        </button>
+                      )}
+                      {(user.role === 'user') && (
+                        <button 
+                          onClick={handleChatClick}
+                          className={`hidden md:flex items-center gap-4 p-4 rounded-xl transition-all ${activeTab === 'chat' ? 'bg-accent text-black' : (theme === 'dark' ? 'hover:bg-white/5 text-zinc-400 hover:text-white' : 'hover:bg-zinc-100 text-zinc-600 hover:text-zinc-900')}`}
+                        >
+                          <MessageSquare className="w-5 h-5" />
+                          <span className="text-[10px] font-black uppercase tracking-widest">Chat</span>
+                          {unreadCount > 0 && <span className="ml-auto bg-accent text-black px-2 py-0.5 rounded-full text-[8px] font-black">{unreadCount}</span>}
+                        </button>
+                      )}
+
+                      <button 
+                        onClick={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); setIsHeaderMenuOpen(false); }}
+                        className={`flex items-center gap-4 p-4 rounded-xl transition-all ${theme === 'dark' ? 'hover:bg-white/5 text-zinc-400 hover:text-white' : 'hover:bg-zinc-100 text-zinc-600 hover:text-zinc-900'}`}
+                      >
+                        {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                        <span className="text-[10px] font-black uppercase tracking-widest">Tema {theme === 'dark' ? 'Chiaro' : 'Scuro'}</span>
+                      </button>
+
+                      <div className={`h-px my-2 ${theme === 'dark' ? 'bg-white/5' : 'bg-zinc-100'}`} />
+
+                      <button 
+                        onClick={() => { handleLogout(); setIsHeaderMenuOpen(false); }}
+                        className={`flex items-center gap-4 p-4 rounded-xl transition-all text-red-500 hover:bg-red-500/10`}
+                      >
+                        <LogOut className="w-5 h-5" />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Logout</span>
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Content */}
-      <main className={`max-w-7xl mx-auto flex-1 w-full ${activeTab === 'dashboard' && user.role === 'pt' ? 'px-4 py-4 flex flex-col min-h-0 overflow-hidden' : 'px-4 py-8 overflow-y-auto'}`}>
+      <main className={`max-w-7xl mx-auto flex-1 w-full ${activeTab === 'dashboard' && user.role === 'pt' ? 'px-4 py-4 flex flex-col min-h-0 lg:overflow-hidden overflow-y-auto pb-32' : 'px-4 py-8 overflow-y-auto'}`}>
         <AnimatePresence mode="wait">
           {activeTab === 'home' ? (
             <motion.div
@@ -3715,6 +3865,14 @@ export default function App() {
                   setSelectedClient={setSelectedClient}
                   initialView={ptTargetView}
                   onViewHandled={() => setPtTargetView(null)}
+                  newMessagesCount={chatDividerCount}
+                  onRead={() => {
+                    if (selectedClient) {
+                      const countForClient = unreadNotifications.filter(n => n.sender_id === selectedClient.id).length;
+                      setUnreadNotifications(prev => prev.filter(n => n.sender_id !== selectedClient.id));
+                      setUnreadCount(prev => Math.max(0, prev - countForClient));
+                    }
+                  }}
                 />
               ) : (
                 <UserDashboard user={user} theme={theme} />
@@ -3752,7 +3910,7 @@ export default function App() {
             >
               <div className="max-w-4xl mx-auto mt-10">
                 {coach ? (
-                  <Chat currentUser={user} otherUser={coach} onBack={() => setActiveTab('dashboard')} theme={theme} />
+                  <Chat currentUser={user} otherUser={coach} onBack={() => setActiveTab('dashboard')} theme={theme} newMessagesCount={chatDividerCount} />
                 ) : (
                   <div className="text-center py-20 text-zinc-500 font-bold uppercase tracking-widest text-xs">Caricamento dati coach...</div>
                 )}
@@ -3765,22 +3923,37 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <Notifications 
-                coachId={user.id} 
-                onBack={() => setActiveTab('home')} 
-                onReply={(userId) => {
-                  if (user.role === 'pt') {
-                    const client = clients.find(c => c.id === userId);
+              <div className="max-w-4xl mx-auto mt-10">
+                {user.role === 'pt' ? (
+                  <CoachInbox 
+                    unreadNotifications={unreadNotifications} 
+                    onBack={() => setActiveTab('dashboard')} 
+                    onSelectAthlete={(senderId) => {
+                      const client = clients.find(c => c.id === senderId);
+                      if (client) {
+                        const countForClient = unreadNotifications.filter(n => n.sender_id === senderId).length;
+                        setChatDividerCount(countForClient);
+                        setSelectedClient(client);
+                        setPtTargetView('chat');
+                        setActiveTab('dashboard');
+                        // Local update to clear badge
+                        setUnreadNotifications(prev => prev.filter(n => n.sender_id !== senderId));
+                        setUnreadCount(prev => Math.max(0, prev - countForClient));
+                      }
+                    }} 
+                    theme={theme} 
+                  />
+                ) : (
+                  <Notifications coachId={user.id} onBack={() => setActiveTab('dashboard')} onReply={(senderId) => {
+                    const client = clients.find(c => c.id === senderId);
                     if (client) {
                       setSelectedClient(client);
                       setPtTargetView('chat');
                       setActiveTab('dashboard');
                     }
-                  }
-                }} 
-                theme={theme} 
-                fullView={true}
-              />
+                  }} theme={theme} fullView={true} />
+                )}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -3830,12 +4003,10 @@ export default function App() {
         )}
         {user.role === 'user' && (
           <button 
-            onClick={() => setActiveTab('chat' as any)}
+            onClick={handleChatClick}
             className={`flex flex-col items-center gap-2 relative ${activeTab === 'chat' ? 'text-accent' : 'text-zinc-600'}`}
           >
-            <div className={`w-10 h-10 flex items-center justify-center rounded-xl border transition-all ${activeTab === 'chat' ? 'bg-accent border-accent text-black' : (theme === 'dark' ? 'bg-zinc-900 text-accent border-white/5' : 'bg-white text-accent border-zinc-200')}`}>
-              <MessageSquare className="w-6 h-6" />
-            </div>
+            <MessageSquare className="w-7 h-7" />
             <span className="text-[10px] font-black uppercase tracking-widest">Chat</span>
             {unreadCount > 0 && (
               <div className="absolute -top-1 -right-1 w-5 h-5 bg-accent rounded-full flex items-center justify-center text-[10px] font-black text-black shadow-lg shadow-accent/20 border-2 border-black">

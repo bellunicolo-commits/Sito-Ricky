@@ -1993,27 +1993,23 @@ const SettingsView = ({ user, onBack, theme, settings: initialSettings, updateSe
   );
 };
 
-const PTHome = ({ user, theme, onAthleteClick, onNotificationsClick }: { user: User, theme: 'dark' | 'light', onAthleteClick: (client: User) => void, onNotificationsClick: () => void }) => {
+const PTHome = ({ user, theme, clients, onAthleteClick, onNotificationsClick }: { user: User, theme: 'dark' | 'light', clients: User[], onAthleteClick: (client: User) => void, onNotificationsClick: () => void }) => {
   const [view, setView] = useState<'home' | 'chat'>('home');
   const [chatUser, setChatUser] = useState<User | null>(null);
-  const [clients, setClients] = useState<User[]>([]);
-
-  useEffect(() => {
-    fetch('/api/users').then(res => res.json()).then(data => setClients(Array.isArray(data) ? data : []));
-  }, []);
+  const safeClients = Array.isArray(clients) ? clients : [];
 
   if (view === 'chat' && chatUser) {
     return <Chat currentUser={user} otherUser={chatUser} onBack={() => setView('home')} theme={theme} />;
   }
 
-  const expiringAthletes = clients
+  const expiringAthletes = safeClients
     .filter(c => {
       const daysLeft = getDaysRemaining(c.contract_end);
       return daysLeft !== null && daysLeft <= 7;
     })
     .sort((a, b) => (getDaysRemaining(a.contract_end) ?? 999) - (getDaysRemaining(b.contract_end) ?? 999));
 
-  const recentAthletes = [...clients]
+  const recentAthletes = [...safeClients]
     .sort((a, b) => {
       // Use created_at if available or ID
       const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -2265,9 +2261,8 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
       (ex.muscle_group || '').toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [searchTerm, exercises, exercisePickerDay]);
-
   const filteredClients = useMemo(() => {
-    let result = clients.filter(c => c.name.toLowerCase().includes(athleteSearch.toLowerCase()));
+    let result = (Array.isArray(clients) ? clients : []).filter(c => c.name.toLowerCase().includes(athleteSearch.toLowerCase()));
     if (filterType === 'experience' && filterValue) {
       result = result.filter(c => c.experience_years?.toString() === filterValue);
     } else if (filterType === 'age' && filterValue) {
@@ -3977,6 +3972,42 @@ export default function App() {
   const [chatDividerCount, setChatDividerCount] = useState(0);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
 
+  const clearSession = () => {
+    fetch('/api/logout', { method: 'POST' }).catch(() => {});
+    setUser(null);
+    setClients([]);
+    setExercises([]);
+    setModels([]);
+    setSelectedClient(null);
+    setUnreadCount(0);
+    setUnreadNotifications([]);
+    setChatDividerCount(0);
+    setIsHeaderMenuOpen(false);
+    setActiveTab('home');
+    localStorage.removeItem('fitplan_user');
+  };
+
+  const fetchApiArray = async <T,>(url: string, setter: React.Dispatch<React.SetStateAction<T[]>>) => {
+    try {
+      const res = await fetch(url);
+      if (res.status === 401 || res.status === 403) {
+        clearSession();
+        return [];
+      }
+      if (!res.ok) {
+        setter([]);
+        return [];
+      }
+      const data = await res.json();
+      const next = Array.isArray(data) ? data as T[] : [];
+      setter(next);
+      return next;
+    } catch {
+      setter([]);
+      return [];
+    }
+  };
+
   // Browser History Management
   useEffect(() => {
     if (!user) return;
@@ -4027,10 +4058,17 @@ export default function App() {
     if (!user) return;
     try {
       const res = await fetch(`/api/notifications/${user.id}`);
+      if (res.status === 401 || res.status === 403) {
+        clearSession();
+        return;
+      }
       const data = await res.json();
       if (Array.isArray(data)) {
         setUnreadCount(data.length);
         setUnreadNotifications(data);
+      } else {
+        setUnreadCount(0);
+        setUnreadNotifications([]);
       }
     } catch (err) {
       console.error("Error fetching unread:", err);
@@ -4051,6 +4089,10 @@ export default function App() {
     const refreshCurrentUser = async () => {
       try {
         const res = await fetch('/api/me');
+        if (res.status === 401 || res.status === 403) {
+          clearSession();
+          return;
+        }
         if (!res.ok) return;
         const freshUser = await res.json();
         if (cancelled) return;
@@ -4071,21 +4113,33 @@ export default function App() {
       clearInterval(interval);
     };
   }, [user?.id]);
-
-  const refreshClients = () => fetch('/api/users').then(res => res.json()).then(setClients);
-  const refreshExercises = () => fetch('/api/exercises').then(res => res.json()).then(setExercises);
-  const refreshModels = () => fetch('/api/models').then(res => res.json()).then(setModels);
+  const refreshClients = () => fetchApiArray<User>('/api/users', setClients);
+  const refreshExercises = () => fetchApiArray<Exercise>('/api/exercises', setExercises);
+  const refreshModels = () => fetchApiArray<ModelPlan>('/api/models', setModels);
 
   useEffect(() => {
-    fetch('/api/settings').then(res => res.json()).then(setSettings);
+    fetch('/api/settings')
+      .then(res => res.ok ? res.json() : {})
+      .then(setSettings)
+      .catch(() => {});
     if (user?.role === 'pt') {
-      Promise.all([refreshClients(), refreshExercises(), refreshModels()]).then(() => setLoading(false));
+      setLoading(true);
+      Promise.all([refreshClients(), refreshExercises(), refreshModels()]).finally(() => setLoading(false));
     } else {
       setLoading(false);
       // Fetch coach info for athletes
       fetch('/api/coach')
-        .then(res => res.json())
-        .then(setCoach);
+        .then(res => {
+          if (res.status === 401 || res.status === 403) {
+            clearSession();
+            return null;
+          }
+          return res.ok ? res.json() : null;
+        })
+        .then(data => {
+          if (data) setCoach(data);
+        })
+        .catch(() => {});
     }
   }, [user]);
 
@@ -4125,9 +4179,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    fetch('/api/logout', { method: 'POST' }).catch(() => {});
-    setUser(null);
-    localStorage.removeItem('fitplan_user');
+    clearSession();
   };
 
   const handleAccountDeleted = () => {
@@ -4298,9 +4350,10 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
             >
               {user.role === 'pt' ? (
-                <PTHome 
-                  user={user} 
-                  theme={theme} 
+                <PTHome
+                  user={user}
+                  theme={theme}
+                  clients={clients}
                   onAthleteClick={(client) => {
                     setSelectedClient(client);
                     setActiveTab('dashboard');

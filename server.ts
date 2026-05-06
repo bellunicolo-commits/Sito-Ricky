@@ -35,7 +35,8 @@ await db.executeMultiple(`
     contract_start TEXT,
     contract_end TEXT,
     experience_years INTEGER,
-    age INTEGER
+    age INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS password_reset_tokens (
@@ -124,6 +125,8 @@ try { await db.execute("ALTER TABLE users ADD COLUMN contract_start TEXT"); } ca
 try { await db.execute("ALTER TABLE users ADD COLUMN contract_end TEXT"); } catch {}
 try { await db.execute("ALTER TABLE users ADD COLUMN experience_years INTEGER"); } catch {}
 try { await db.execute("ALTER TABLE users ADD COLUMN age INTEGER"); } catch {}
+try { await db.execute("ALTER TABLE users ADD COLUMN created_at TEXT"); } catch {}
+try { await db.execute("UPDATE users SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"); } catch {}
 try { await db.execute("ALTER TABLE users ADD COLUMN privacy_accepted_at TEXT"); } catch {}
 try { await db.execute("ALTER TABLE users ADD COLUMN health_consent_at TEXT"); } catch {}
 try { await db.execute("ALTER TABLE users ADD COLUMN age_confirmed_at TEXT"); } catch {}
@@ -440,7 +443,7 @@ async function startServer() {
 
   app.get("/api/me", async (req: any, res) => {
     const result = await db.execute({
-      sql: "SELECT id, name, email, role, bio, notification_email, email_notifications_enabled, contract_start, contract_end, experience_years, age FROM users WHERE id = ?",
+      sql: "SELECT id, name, email, role, bio, notification_email, email_notifications_enabled, contract_start, contract_end, experience_years, age, created_at FROM users WHERE id = ?",
       args: [req.user.id],
     });
     if (result.rows.length === 0) return res.status(404).json({ error: "Utente non trovato" });
@@ -558,7 +561,7 @@ async function startServer() {
   });
 
   app.get("/api/users", requirePt, async (req: any, res) => {
-    const result = await db.execute("SELECT id, name, email, role, bio, contract_start, contract_end, experience_years, age FROM users WHERE role = 'user'");
+    const result = await db.execute("SELECT id, name, email, role, bio, contract_start, contract_end, experience_years, age, created_at FROM users WHERE role = 'user'");
     res.json(result.rows);
   });
 

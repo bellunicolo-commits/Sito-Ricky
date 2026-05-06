@@ -13,6 +13,7 @@ export interface User {
   contract_end?: string;
   experience_years?: number;
   age?: number;
+  created_at?: string;
 }
 
 export interface Message {

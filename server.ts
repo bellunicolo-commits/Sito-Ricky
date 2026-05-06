@@ -85,6 +85,7 @@ await db.executeMultiple(`
     category TEXT,
     sets TEXT,
     reps TEXT,
+    weight TEXT,
     pt_notes TEXT,
     user_notes TEXT,
     recovery TEXT,
@@ -106,6 +107,7 @@ await db.executeMultiple(`
     category TEXT,
     sets TEXT,
     reps TEXT,
+    weight TEXT,
     pt_notes TEXT,
     recovery TEXT,
     notes TEXT,
@@ -122,9 +124,15 @@ try { await db.execute("ALTER TABLE users ADD COLUMN contract_start TEXT"); } ca
 try { await db.execute("ALTER TABLE users ADD COLUMN contract_end TEXT"); } catch {}
 try { await db.execute("ALTER TABLE users ADD COLUMN experience_years INTEGER"); } catch {}
 try { await db.execute("ALTER TABLE users ADD COLUMN age INTEGER"); } catch {}
+try { await db.execute("ALTER TABLE users ADD COLUMN privacy_accepted_at TEXT"); } catch {}
+try { await db.execute("ALTER TABLE users ADD COLUMN health_consent_at TEXT"); } catch {}
+try { await db.execute("ALTER TABLE users ADD COLUMN age_confirmed_at TEXT"); } catch {}
+try { await db.execute("ALTER TABLE users ADD COLUMN consent_version TEXT"); } catch {}
 try { await db.execute("ALTER TABLE exercises ADD COLUMN muscle_group TEXT"); } catch {}
+try { await db.execute("ALTER TABLE plan_items ADD COLUMN weight TEXT"); } catch {}
 try { await db.execute("ALTER TABLE plan_items ADD COLUMN recovery TEXT"); } catch {}
 try { await db.execute("ALTER TABLE plan_items ADD COLUMN notes TEXT"); } catch {}
+try { await db.execute("ALTER TABLE model_items ADD COLUMN weight TEXT"); } catch {}
 try { await db.execute("ALTER TABLE model_items ADD COLUMN recovery TEXT"); } catch {}
 try { await db.execute("ALTER TABLE model_items ADD COLUMN notes TEXT"); } catch {}
 
@@ -174,17 +182,159 @@ if ((userCount.rows[0] as any).count <= 2) {
 
 async function startServer() {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: "100kb" }));
   app.use(cookieParser());
   const PORT = Number(process.env.PORT) || 3000;
-  const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_dev";
+  const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === "production" ? crypto.randomBytes(32).toString("hex") : "fallback_secret_for_dev");
+  const CONSENT_VERSION = "2026-05-05";
+  const PASSWORD_ERROR = "La password deve contenere almeno 8 caratteri e almeno una lettera maiuscola.";
+  const ALLOWED_ORIGIN = "https://coach-bellu-fitplan.onrender.com";
 
-  // Simplified authenticate for dev - no-op to avoid breaking routes but not checking tokens
-  const authenticate = (req: any, res: any, next: any) => next();
+  const cookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  };
+
+  const isValidEmail = (value: unknown) =>
+    typeof value === "string" &&
+    value.length <= 254 &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
+  const hasStrongPassword = (value: unknown) =>
+    typeof value === "string" && value.length >= 8 && /[A-Z]/.test(value);
+
+  const isAccepted = (value: unknown) =>
+    value === true || value === "true" || value === 1 || value === "1" || value === "on";
+
+  const cleanText = (value: unknown, maxLength: number) => {
+    if (typeof value !== "string") return "";
+    return value.trim().slice(0, maxLength);
+  };
+
+  const cleanNullableText = (value: unknown, maxLength: number) => {
+    const text = cleanText(value, maxLength);
+    return text || null;
+  };
+
+  const toId = (value: unknown) => {
+    const id = Number(value);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  };
+
+  const getClientIp = (req: any) => {
+    const forwardedFor = req.headers["x-forwarded-for"];
+    if (typeof forwardedFor === "string" && forwardedFor.length > 0) {
+      return forwardedFor.split(",")[0].trim();
+    }
+    return req.ip || req.socket?.remoteAddress || "unknown";
+  };
+
+  app.use((req: any, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      if (origin === ALLOWED_ORIGIN || process.env.NODE_ENV !== "production") {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Vary", "Origin");
+      } else {
+        return res.status(403).json({ error: "Origine non consentita" });
+      }
+    }
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  });
+
+  app.use((req: any, res, next) => {
+    res.on("finish", () => {
+      if (req.path.startsWith("/api") || req.path === "/user") {
+        console.log(
+          `[ACCESS] ${new Date().toISOString()} ${req.method} ${req.path} ${res.statusCode} ip=${getClientIp(req)} ua="${req.get("user-agent") || ""}"`
+        );
+      }
+    });
+    next();
+  });
+
+  const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+  const loginRateLimit = (req: any, res: any, next: any) => {
+    const key = getClientIp(req);
+    const now = Date.now();
+    const current = loginAttempts.get(key);
+    if (!current || current.resetAt <= now) {
+      loginAttempts.set(key, { count: 1, resetAt: now + 60_000 });
+      return next();
+    }
+    if (current.count >= 5) {
+      return res.status(429).json({ error: "Troppi tentativi. Riprova tra un minuto." });
+    }
+    current.count += 1;
+    loginAttempts.set(key, current);
+    next();
+  };
+
+  const authenticate = async (req: any, res: any, next: any) => {
+    const bearer = req.headers.authorization?.startsWith("Bearer ")
+      ? req.headers.authorization.slice(7)
+      : null;
+    const token = req.cookies?.token || bearer;
+
+    if (!token) {
+      return res.status(401).json({ error: "Autenticazione richiesta" });
+    }
+
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as { id: string; role: string; email: string };
+      const userId = toId(decoded.id);
+      if (!userId) throw new Error("Invalid token subject");
+
+      const result = await db.execute({
+        sql: "SELECT id, email, name, role FROM users WHERE id = ?",
+        args: [userId],
+      });
+      const user = result.rows[0] as any;
+      if (!user) throw new Error("User no longer exists");
+
+      req.user = {
+        id: Number(user.id),
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      };
+      next();
+    } catch {
+      res.clearCookie("token");
+      res.status(401).json({ error: "Sessione non valida o scaduta" });
+    }
+  };
+
+  const requirePt = (req: any, res: any, next: any) => {
+    if (req.user?.role !== "pt") {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
+    next();
+  };
+
+  const canAccessUser = (req: any, userId: number) => req.user?.role === "pt" || req.user?.id === userId;
+
+  const deleteUserData = async (userId: number) => {
+    await db.execute({ sql: "DELETE FROM password_reset_tokens WHERE user_id = ?", args: [userId] });
+    await db.execute({ sql: "DELETE FROM messages WHERE sender_id = ? OR receiver_id = ?", args: [userId, userId] });
+
+    const userPlans = await db.execute({ sql: "SELECT id FROM plans WHERE user_id = ? OR pt_id = ?", args: [userId, userId] });
+    for (const plan of userPlans.rows as any[]) {
+      await db.execute({ sql: "DELETE FROM plan_items WHERE plan_id = ?", args: [plan.id] });
+    }
+    await db.execute({ sql: "DELETE FROM plans WHERE user_id = ? OR pt_id = ?", args: [userId, userId] });
+    await db.execute({ sql: "DELETE FROM users WHERE id = ?", args: [userId] });
+  };
 
   // ✅ Brevo HTTP API - replaces nodemailer SMTP
   const sendMail = async (to: string, subject: string, text: string) => {
-    console.log(`[EMAIL] Sending to: ${to} | Subject: ${subject}`);
+    console.log(`[EMAIL] Sending transactional email | Subject: ${subject}`);
     if (!process.env.BREVO_API_KEY) {
       console.log("[EMAIL] No BREVO_API_KEY set, skipping email.");
       return;
@@ -214,8 +364,11 @@ async function startServer() {
     }
   };
 
-  app.post("/api/login", async (req, res) => {
+  app.post("/api/login", loginRateLimit, async (req, res) => {
     const { email, password } = req.body;
+    if (!isValidEmail(email) || typeof password !== "string" || !password) {
+      return res.status(401).json({ error: "Credenziali non valide" });
+    }
     const result = await db.execute({ sql: "SELECT * FROM users WHERE email = ?", args: [email] });
     if (result.rows.length > 0) {
       const user: any = result.rows[0];
@@ -223,7 +376,7 @@ async function startServer() {
       if (match) {
         const token = jwt.sign({ id: user.id.toString(), role: user.role, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
         delete user.password;
-        res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' });
+        res.cookie('token', token, cookieOptions);
         res.json(user);
       } else {
         res.status(401).json({ error: "Credenziali non valide" });
@@ -242,22 +395,31 @@ async function startServer() {
 
   app.post("/api/forgot-password", async (req, res) => {
     const { email } = req.body;
+    const genericMessage = "Se l'email e registrata, riceverai le istruzioni per reimpostare la password.";
+    if (!isValidEmail(email)) {
+      return res.json({ message: genericMessage });
+    }
     const result = await db.execute({ sql: "SELECT * FROM users WHERE email = ?", args: [email] });
     const user = result.rows[0] as any;
     if (user) {
       const token = crypto.randomBytes(32).toString("hex");
       const expires = new Date(Date.now() + 3600000).toISOString();
       await db.execute({ sql: "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)", args: [user.id, token, expires] });
-      const resetUrl = `${req.headers.origin}/reset-password?token=${token}`;
+      const resetOrigin = req.headers.origin || process.env.APP_URL || ALLOWED_ORIGIN;
+      const resetUrl = `${resetOrigin}/reset-password?token=${token}`;
       await sendMail(email, "Reset Password - Coach Bellu", `Ciao ${user.name}, clicca qui per resettare la tua password: ${resetUrl}`);
-      res.json({ message: "Email di recupero inviata con successo!" });
-    } else {
-      res.status(404).json({ error: "Email non trovata" });
     }
+    res.json({ message: genericMessage });
   });
 
   app.post("/api/reset-password", async (req, res) => {
     const { token, password } = req.body;
+    if (typeof token !== "string" || token.length < 32) {
+      return res.status(400).json({ error: "Token non valido o scaduto" });
+    }
+    if (!hasStrongPassword(password)) {
+      return res.status(400).json({ error: PASSWORD_ERROR });
+    }
     const result = await db.execute({ sql: "SELECT * FROM password_reset_tokens WHERE token = ? AND expires_at > ?", args: [token, new Date().toISOString()] });
     const resetToken = result.rows[0] as any;
     if (resetToken) {
@@ -270,58 +432,132 @@ async function startServer() {
     }
   });
 
+  app.use("/api", (req: any, res: any, next: any) => {
+    if (req.method === "POST" && req.path === "/register") return next();
+    if (req.method === "GET" && req.path === "/settings") return next();
+    return authenticate(req, res, next);
+  });
+
+  app.get("/api/me", async (req: any, res) => {
+    const result = await db.execute({
+      sql: "SELECT id, name, email, role, bio, notification_email, email_notifications_enabled, contract_start, contract_end, experience_years, age FROM users WHERE id = ?",
+      args: [req.user.id],
+    });
+    if (result.rows.length === 0) return res.status(404).json({ error: "Utente non trovato" });
+    res.json(result.rows[0]);
+  });
+
   app.post("/api/messages", async (req: any, res) => {
     const { sender_id, receiver_id, content } = req.body;
-    const result = await db.execute({ sql: "INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)", args: [sender_id, receiver_id, content] });
-    const receiver = (await db.execute({ sql: "SELECT * FROM users WHERE id = ?", args: [receiver_id] })).rows[0] as any;
-    if (receiver && receiver.role === 'pt' && receiver.email_notifications_enabled) {
-      const sender = (await db.execute({ sql: "SELECT name FROM users WHERE id = ?", args: [sender_id] })).rows[0] as any;
-      const targetEmail = receiver.notification_email || receiver.email;
-      await sendMail(targetEmail, "Nuova Notifica - Coach Bellu", `Hai ricevuto un nuovo messaggio da ${sender.name}: "${content}"`);
+    const senderId = toId(sender_id);
+    const receiverId = toId(receiver_id);
+    const safeContent = cleanText(content, 2000);
+    if (!senderId || !receiverId || !safeContent || senderId !== req.user.id) {
+      return res.status(400).json({ error: "Dati messaggio non validi" });
     }
-    res.json({ id: result.lastInsertRowid, sender_id, receiver_id, content });
+    const receiver = (await db.execute({ sql: "SELECT * FROM users WHERE id = ?", args: [receiverId] })).rows[0] as any;
+    if (!receiver) {
+      return res.status(404).json({ error: "Destinatario non trovato" });
+    }
+    if (req.user.role !== "pt" && receiver.role !== "pt") {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
+    const result = await db.execute({ sql: "INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)", args: [senderId, receiverId, safeContent] });
+    if (receiver && receiver.role === 'pt' && receiver.email_notifications_enabled) {
+      const sender = (await db.execute({ sql: "SELECT name FROM users WHERE id = ?", args: [senderId] })).rows[0] as any;
+      const targetEmail = receiver.notification_email || receiver.email;
+      await sendMail(targetEmail, "Nuova Notifica - Coach Bellu", `Hai ricevuto un nuovo messaggio da ${sender.name}: "${safeContent}"`);
+    }
+    res.json({ id: result.lastInsertRowid, sender_id: senderId, receiver_id: receiverId, content: safeContent });
   });
 
   app.get("/api/messages/:userId", async (req: any, res) => {
-    const { userId } = req.params;
-    const { otherId } = req.query;
-    const result = await db.execute({ sql: `SELECT * FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY created_at ASC`, args: [userId, otherId as string, otherId as string, userId] });
+    const userId = toId(req.params.userId);
+    const otherId = toId(req.query.otherId);
+    if (!userId || !otherId || userId !== req.user.id) {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
+    const result = await db.execute({ sql: `SELECT * FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY created_at ASC`, args: [userId, otherId, otherId, userId] });
     res.json(result.rows);
   });
 
   app.get("/api/notifications/:userId", async (req: any, res) => {
-    const targetId = req.params.userId;
-    const result = await db.execute({ sql: `SELECT m.*, u.name as sender_name FROM messages m JOIN users u ON m.sender_id = u.id WHERE m.receiver_id = ? AND m.is_read = 0 ORDER BY m.created_at DESC`, args: [targetId] });
+    const targetId = toId(req.params.userId);
+    if (!targetId || targetId !== req.user.id) {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
+    const result = await db.execute({ sql: `SELECT m.*, u.name as sender_name FROM messages m JOIN users u ON m.sender_id = u.id WHERE m.receiver_id = ? AND m.sender_id != ? AND m.is_read = 0 ORDER BY m.created_at DESC`, args: [targetId, targetId] });
+    res.json(result.rows);
+  });
+
+  app.get("/api/notifications/full/:userId", async (req: any, res) => {
+    const targetId = toId(req.params.userId);
+    if (!targetId || targetId !== req.user.id) {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
+    const result = await db.execute({ sql: `SELECT m.*, u.name as sender_name FROM messages m JOIN users u ON m.sender_id = u.id WHERE m.receiver_id = ? AND m.sender_id != ? ORDER BY m.created_at DESC LIMIT 100`, args: [targetId, targetId] });
     res.json(result.rows);
   });
 
   app.patch("/api/messages/read", async (req: any, res) => {
     const { receiverId, senderId } = req.body;
-    await db.execute({ sql: "UPDATE messages SET is_read = 1 WHERE receiver_id = ? AND sender_id = ?", args: [receiverId, senderId] });
+    const receiver = toId(receiverId);
+    const sender = toId(senderId);
+    if (!receiver || !sender || receiver !== req.user.id) {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
+    await db.execute({ sql: "UPDATE messages SET is_read = 1 WHERE receiver_id = ? AND sender_id = ?", args: [receiver, sender] });
     res.json({ success: true });
   });
 
   app.patch("/api/users/:id/notifications", async (req: any, res) => {
+    const targetId = toId(req.params.id);
+    if (!targetId || targetId !== req.user.id) {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
     const { notification_email, email_notifications_enabled } = req.body;
-    await db.execute({ sql: "UPDATE users SET notification_email = ?, email_notifications_enabled = ? WHERE id = ?", args: [notification_email, email_notifications_enabled ? 1 : 0, req.params.id] });
+    if (notification_email && !isValidEmail(notification_email)) {
+      return res.status(400).json({ error: "Email non valida" });
+    }
+    await db.execute({ sql: "UPDATE users SET notification_email = ?, email_notifications_enabled = ? WHERE id = ?", args: [notification_email || null, email_notifications_enabled ? 1 : 0, targetId] });
     res.json({ success: true });
   });
 
   app.post("/api/register", async (req, res) => {
-    const { email, password, name } = req.body;
+    const { email, password, name, privacyAccepted, healthConsent, ageConfirmed } = req.body;
+    const safeName = cleanText(name, 120);
+    if (!safeName || !isValidEmail(email)) {
+      return res.status(400).json({ error: "Nome o email non validi" });
+    }
+    if (!hasStrongPassword(password)) {
+      return res.status(400).json({ error: PASSWORD_ERROR });
+    }
+    if (!isAccepted(privacyAccepted)) {
+      return res.status(400).json({ error: "Devi accettare la Privacy Policy per registrarti." });
+    }
+    if (!isAccepted(healthConsent)) {
+      return res.status(400).json({ error: "Devi prestare il consenso esplicito al trattamento dei dati relativi alla salute." });
+    }
+    if (!isAccepted(ageConfirmed)) {
+      return res.status(400).json({ error: "Devi avere almeno 14 anni per usare questo servizio." });
+    }
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
-      const result = await db.execute({ sql: "INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)", args: [email, hashedPassword, name, 'user'] });
+      const consentAt = new Date().toISOString();
+      const result = await db.execute({
+        sql: "INSERT INTO users (email, password, name, role, privacy_accepted_at, health_consent_at, age_confirmed_at, consent_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        args: [email, hashedPassword, safeName, 'user', consentAt, consentAt, consentAt, CONSENT_VERSION]
+      });
       const userId = result.lastInsertRowid;
       const token = jwt.sign({ id: userId.toString(), role: 'user', email }, JWT_SECRET, { expiresIn: '7d' });
-      res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' });
-      res.json({ id: userId, email, name, role: 'user' });
+      res.cookie('token', token, cookieOptions);
+      res.json({ id: userId, email, name: safeName, role: 'user' });
     } catch (err) {
       res.status(400).json({ error: "Email già registrata" });
     }
   });
 
-  app.get("/api/users", async (req: any, res) => {
+  app.get("/api/users", requirePt, async (req: any, res) => {
     const result = await db.execute("SELECT id, name, email, role, bio, contract_start, contract_end, experience_years, age FROM users WHERE role = 'user'");
     res.json(result.rows);
   });
@@ -336,11 +572,39 @@ async function startServer() {
   });
 
   app.patch("/api/users/:id", async (req: any, res) => {
+    const targetId = toId(req.params.id);
+    if (!targetId || !canAccessUser(req, targetId)) {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
+    const existing = (await db.execute({ sql: "SELECT * FROM users WHERE id = ?", args: [targetId] })).rows[0] as any;
+    if (!existing) {
+      return res.status(404).json({ error: "Utente non trovato" });
+    }
     const { name, email, bio, contract_start, contract_end, experience_years, age } = req.body;
+    const nextName = name === undefined ? existing.name : cleanText(name, 120);
+    const nextEmail = email === undefined ? existing.email : cleanText(email, 254);
+    const nextBio = bio === undefined ? existing.bio : cleanText(bio, 1000);
+    const nextContractStart = contract_start === undefined ? existing.contract_start : cleanNullableText(contract_start, 40);
+    const nextContractEnd = contract_end === undefined ? existing.contract_end : cleanNullableText(contract_end, 40);
+    const ageInput = age === undefined ? existing.age : age;
+    const experienceInput = experience_years === undefined ? existing.experience_years : experience_years;
+    const ageNumber = Number(ageInput);
+    const experienceNumber = Number(experienceInput);
+    const safeAge = ageInput === "" || ageInput === null || ageInput === undefined || ageNumber === 0 ? null : ageNumber;
+    const safeExperience = experienceInput === "" || experienceInput === null || experienceInput === undefined ? null : experienceNumber;
+    if (!nextName || !isValidEmail(nextEmail)) {
+      return res.status(400).json({ error: "Nome o email non validi" });
+    }
+    if (safeAge !== null && (!Number.isInteger(safeAge) || safeAge < 14 || safeAge > 120)) {
+      return res.status(400).json({ error: "Eta non valida" });
+    }
+    if (safeExperience !== null && (!Number.isInteger(safeExperience) || safeExperience < 0 || safeExperience > 100)) {
+      return res.status(400).json({ error: "Anni di esperienza non validi" });
+    }
     try {
       await db.execute({ 
         sql: "UPDATE users SET name = ?, email = ?, bio = ?, contract_start = ?, contract_end = ?, experience_years = ?, age = ? WHERE id = ?", 
-        args: [name, email, bio, contract_start, contract_end, experience_years, age, req.params.id] 
+        args: [nextName, nextEmail, nextBio, nextContractStart, nextContractEnd, safeExperience, safeAge, targetId]
       });
       res.json({ success: true });
     } catch (err) {
@@ -363,29 +627,44 @@ async function startServer() {
     console.error("Error cleaning up exercises:", err);
   }
 
-  app.delete("/api/users/:id", async (req: any, res) => {
-    const plansResult = await db.execute({ sql: "SELECT id FROM plans WHERE user_id = ?", args: [req.params.id] });
-    const plans = plansResult.rows as unknown as { id: number }[];
-    for (const plan of plans) {
-      await db.execute({ sql: "DELETE FROM plan_items WHERE plan_id = ?", args: [plan.id] });
+  const deleteOwnAccount = async (req: any, res: any) => {
+    await deleteUserData(req.user.id);
+    res.clearCookie("token");
+    res.json({ success: true });
+  };
+
+  app.delete("/api/user", deleteOwnAccount);
+  app.delete("/user", authenticate, deleteOwnAccount);
+
+  app.delete("/api/users/:id", requirePt, async (req: any, res) => {
+    const targetId = toId(req.params.id);
+    if (!targetId || targetId === req.user.id) {
+      return res.status(400).json({ error: "Atleta non valido" });
     }
-    await db.execute({ sql: "DELETE FROM plans WHERE user_id = ?", args: [req.params.id] });
-    await db.execute({ sql: "DELETE FROM users WHERE id = ?", args: [req.params.id] });
+    const target = (await db.execute({ sql: "SELECT id, role FROM users WHERE id = ?", args: [targetId] })).rows[0] as any;
+    if (!target || target.role !== "user") {
+      return res.status(404).json({ error: "Atleta non trovato" });
+    }
+    await deleteUserData(targetId);
     res.json({ success: true });
   });
 
-  app.get("/api/exercises", async (req, res) => {
+  app.get("/api/exercises", requirePt, async (req, res) => {
     const result = await db.execute("SELECT * FROM exercises ORDER BY category, name");
     res.json(result.rows);
   });
 
-  app.post("/api/exercises", async (req: any, res) => {
+  app.post("/api/exercises", requirePt, async (req: any, res) => {
     const { name, category, muscle_group } = req.body;
-    const result = await db.execute({ sql: "INSERT INTO exercises (name, category, muscle_group) VALUES (?, ?, ?)", args: [name, category, muscle_group] });
-    res.json({ id: result.lastInsertRowid, name, category, muscle_group });
+    const safeName = cleanText(name, 120);
+    const safeCategory = cleanText(category, 80);
+    const safeMuscle = cleanText(muscle_group, 80);
+    if (!safeName || !safeCategory) return res.status(400).json({ error: "Dati esercizio non validi" });
+    const result = await db.execute({ sql: "INSERT INTO exercises (name, category, muscle_group) VALUES (?, ?, ?)", args: [safeName, safeCategory, safeMuscle] });
+    res.json({ id: result.lastInsertRowid, name: safeName, category: safeCategory, muscle_group: safeMuscle });
   });
 
-  app.get("/api/models", async (req: any, res) => {
+  app.get("/api/models", requirePt, async (req: any, res) => {
     const modelsResult = await db.execute("SELECT * FROM models ORDER BY created_at DESC");
     const models = modelsResult.rows;
     const modelsWithItems = await Promise.all(models.map(async (model: any) => {
@@ -395,46 +674,74 @@ async function startServer() {
     res.json(modelsWithItems);
   });
   
-  app.get("/api/models/:id/items", async (req: any, res) => {
+  app.get("/api/models/:id/items", requirePt, async (req: any, res) => {
     const items = (await db.execute({ sql: "SELECT * FROM model_items WHERE model_id = ?", args: [req.params.id] })).rows;
     res.json(items);
   });
   
-  app.post("/api/models", async (req: any, res) => {
+  app.post("/api/models", requirePt, async (req: any, res) => {
     const { name, description, items } = req.body;
-    const modelResult = await db.execute({ sql: "INSERT INTO models (name, description) VALUES (?, ?)", args: [name, description] });
+    const safeName = cleanText(name, 120);
+    const safeDescription = cleanText(description, 1000);
+    if (!safeName || !Array.isArray(items)) {
+      return res.status(400).json({ error: "Dati modello non validi" });
+    }
+    const modelResult = await db.execute({ sql: "INSERT INTO models (name, description) VALUES (?, ?)", args: [safeName, safeDescription] });
     const modelId = modelResult.lastInsertRowid;
     for (const item of items) {
-      await db.execute({ sql: "INSERT INTO model_items (model_id, day, exercise_name, category, sets, reps, pt_notes, recovery, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", args: [modelId, item.day || 'Giorno A', item.exercise_name, item.category, item.sets, item.reps, item.pt_notes || '', item.recovery || '', item.notes || ''] as any });
+      await db.execute({ sql: "INSERT INTO model_items (model_id, day, exercise_name, category, sets, reps, weight, pt_notes, recovery, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", args: [modelId, cleanNullableText(item.day, 40) || 'Giorno A', cleanText(item.exercise_name, 120), cleanText(item.category, 80), cleanNullableText(item.sets, 40), cleanNullableText(item.reps, 40), cleanNullableText(item.weight, 40), cleanNullableText(item.pt_notes, 500) || '', cleanNullableText(item.recovery, 80) || '', cleanNullableText(item.notes, 1000) || ''] as any });
     }
     res.json({ id: modelId });
   });
 
-  app.delete("/api/models/:id", async (req: any, res) => {
+  app.patch("/api/models/:id", requirePt, async (req: any, res) => {
+    const modelId = toId(req.params.id);
+    const { name, description, items } = req.body;
+    const safeName = cleanText(name, 120);
+    const safeDescription = cleanText(description, 1000);
+    if (!modelId || !safeName || !Array.isArray(items)) {
+      return res.status(400).json({ error: "Dati modello non validi" });
+    }
+    await db.execute({ sql: "UPDATE models SET name = ?, description = ? WHERE id = ?", args: [safeName, safeDescription, modelId] });
+    await db.execute({ sql: "DELETE FROM model_items WHERE model_id = ?", args: [modelId] });
+    for (const item of items) {
+      await db.execute({ sql: "INSERT INTO model_items (model_id, day, exercise_name, category, sets, reps, weight, pt_notes, recovery, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", args: [modelId, cleanNullableText(item.day, 40) || 'Giorno A', cleanText(item.exercise_name, 120), cleanText(item.category, 80), cleanNullableText(item.sets, 40), cleanNullableText(item.reps, 40), cleanNullableText(item.weight, 40), cleanNullableText(item.pt_notes, 500) || '', cleanNullableText(item.recovery, 80) || '', cleanNullableText(item.notes, 1000) || ''] as any });
+    }
+    res.json({ success: true });
+  });
+
+  app.delete("/api/models/:id", requirePt, async (req: any, res) => {
     await db.execute({ sql: "DELETE FROM model_items WHERE model_id = ?", args: [req.params.id] });
     await db.execute({ sql: "DELETE FROM models WHERE id = ?", args: [req.params.id] });
     res.json({ success: true });
   });
 
-  app.patch("/api/exercises/:id", async (req: any, res) => {
+  app.patch("/api/exercises/:id", requirePt, async (req: any, res) => {
     const { name, category, muscle_group } = req.body;
-    await db.execute({ sql: "UPDATE exercises SET name = ?, category = ?, muscle_group = ? WHERE id = ?", args: [name, category, muscle_group, req.params.id] });
+    const safeName = cleanText(name, 120);
+    const safeCategory = cleanText(category, 80);
+    const safeMuscle = cleanText(muscle_group, 80);
+    if (!safeName || !safeCategory) return res.status(400).json({ error: "Dati esercizio non validi" });
+    await db.execute({ sql: "UPDATE exercises SET name = ?, category = ?, muscle_group = ? WHERE id = ?", args: [safeName, safeCategory, safeMuscle, req.params.id] });
     res.json({ success: true });
   });
 
-  app.delete("/api/exercises/:id", async (req: any, res) => {
+  app.delete("/api/exercises/:id", requirePt, async (req: any, res) => {
     await db.execute({ sql: "DELETE FROM exercises WHERE id = ?", args: [req.params.id] });
     res.json({ success: true });
   });
 
-  app.delete("/api/plans/:id", async (req: any, res) => {
+  app.delete("/api/plans/:id", requirePt, async (req: any, res) => {
     await db.execute({ sql: "DELETE FROM plan_items WHERE plan_id = ?", args: [req.params.id] });
     await db.execute({ sql: "DELETE FROM plans WHERE id = ?", args: [req.params.id] });
     res.json({ success: true });
   });
 
   app.get("/api/plans/:userId/history", async (req: any, res) => {
-    const targetId = req.params.userId;
+    const targetId = toId(req.params.userId);
+    if (!targetId || !canAccessUser(req, targetId)) {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
     const plans = (await db.execute({ sql: "SELECT * FROM plans WHERE user_id = ? ORDER BY created_at DESC", args: [targetId] })).rows;
     const plansWithItems = await Promise.all(plans.map(async (plan: any) => {
       const items = (await db.execute({ sql: "SELECT * FROM plan_items WHERE plan_id = ?", args: [plan.id] })).rows;
@@ -444,7 +751,10 @@ async function startServer() {
   });
 
   app.get("/api/plans/:userId", async (req: any, res) => {
-    const targetId = req.params.userId;
+    const targetId = toId(req.params.userId);
+    if (!targetId || !canAccessUser(req, targetId)) {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
     const result = await db.execute({ sql: "SELECT * FROM plans WHERE user_id = ? ORDER BY created_at DESC LIMIT 1", args: [targetId] });
     if (result.rows.length === 0) return res.json(null);
     const plan = result.rows[0] as any;
@@ -452,19 +762,39 @@ async function startServer() {
     res.json({ ...plan, items });
   });
 
-  app.post("/api/plans", async (req: any, res) => {
+  app.post("/api/plans", requirePt, async (req: any, res) => {
     const { userId, ptId, items } = req.body;
-    const planResult = await db.execute({ sql: "INSERT INTO plans (user_id, pt_id) VALUES (?, ?)", args: [userId, ptId] });
+    const targetUserId = toId(userId);
+    if (!targetUserId || Number(ptId) !== req.user.id) {
+      return res.status(400).json({ error: "Dati piano non validi" });
+    }
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ error: "Esercizi piano non validi" });
+    }
+    const planResult = await db.execute({ sql: "INSERT INTO plans (user_id, pt_id) VALUES (?, ?)", args: [targetUserId, req.user.id] });
     const planId = planResult.lastInsertRowid;
     for (const item of items) {
-      await db.execute({ sql: "INSERT INTO plan_items (plan_id, day, exercise_name, category, sets, reps, pt_notes, recovery, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", args: [planId, item.day || 'Giorno A', item.exercise_name, item.category, item.sets, item.reps, item.pt_notes || '', item.recovery || '', item.notes || ''] as any });
+      await db.execute({ sql: "INSERT INTO plan_items (plan_id, day, exercise_name, category, sets, reps, weight, pt_notes, recovery, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", args: [planId, cleanNullableText(item.day, 40) || 'Giorno A', cleanText(item.exercise_name, 120), cleanText(item.category, 80), cleanNullableText(item.sets, 40), cleanNullableText(item.reps, 40), cleanNullableText(item.weight, 40), cleanNullableText(item.pt_notes, 500) || '', cleanNullableText(item.recovery, 80) || '', cleanNullableText(item.notes, 1000) || ''] as any });
     }
     res.json({ id: planId });
   });
 
   app.patch("/api/plan-items/:itemId", async (req: any, res) => {
+    const itemId = toId(req.params.itemId);
+    if (!itemId) {
+      return res.status(400).json({ error: "Elemento non valido" });
+    }
+    const ownership = await db.execute({
+      sql: "SELECT p.user_id FROM plan_items pi JOIN plans p ON pi.plan_id = p.id WHERE pi.id = ?",
+      args: [itemId],
+    });
+    const row = ownership.rows[0] as any;
+    if (!row || (req.user.role !== "pt" && Number(row.user_id) !== req.user.id)) {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
     const { user_notes } = req.body;
-    await db.execute({ sql: "UPDATE plan_items SET user_notes = ? WHERE id = ?", args: [user_notes, req.params.itemId] });
+    const safeNotes = cleanText(user_notes, 2000);
+    await db.execute({ sql: "UPDATE plan_items SET user_notes = ? WHERE id = ?", args: [safeNotes, itemId] });
     res.json({ success: true });
   });
 
@@ -474,7 +804,7 @@ async function startServer() {
     res.json(settingsObj);
   });
 
-  app.patch("/api/settings", async (req: any, res) => {
+  app.patch("/api/settings", requirePt, async (req: any, res) => {
     const settings = req.body;
     for (const [key, value] of Object.entries(settings)) {
       await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", args: [key, value as any] });

@@ -43,13 +43,40 @@ import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { User, Plan, Exercise, PlanItem, Role, ModelPlan } from './types';
 
+const parseDateValue = (value?: string) => {
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+  return new Date(value);
+};
+
 const getDaysRemaining = (endDate?: string) => {
-  if (!endDate) return null;
-  const end = new Date(endDate);
+  const end = parseDateValue(endDate);
+  if (!end) return null;
   const now = new Date();
   const diffTime = end.getTime() - now.getTime();
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   return diffDays;
+};
+
+const PASSWORD_RULE_MESSAGE = 'La password deve contenere almeno 8 caratteri e almeno una lettera maiuscola.';
+const hasStrongPassword = (value: string) => value.length >= 8 && /[A-Z]/.test(value);
+
+const isContractExpired = (endDate?: string) => {
+  const end = parseDateValue(endDate);
+  if (!end) return false;
+  if (Number.isNaN(end.getTime())) return false;
+  end.setHours(23, 59, 59, 999);
+  return end.getTime() < Date.now();
+};
+
+const formatExerciseLoad = (item: PlanItem) => {
+  const parts = [`${item.sets || '-'} x ${item.reps || '-'}`];
+  if (item.weight) parts.push(`${item.weight} kg`);
+  if (item.recovery) parts.push(`Rec. ${item.recovery}`);
+  return parts.join(' - ');
 };
 
 // --- Components ---
@@ -58,6 +85,8 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [isForgot, setIsForgot] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [healthConsent, setHealthConsent] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -73,6 +102,18 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
 
     if (!isLogin && !isForgot && !privacyAccepted) {
       setError('Devi accettare la Privacy Policy per registrarti.');
+      return;
+    }
+    if (!isLogin && !isForgot && !healthConsent) {
+      setError('Devi prestare il consenso esplicito al trattamento dei dati relativi alla salute.');
+      return;
+    }
+    if (!isLogin && !isForgot && !ageConfirmed) {
+      setError('Devi avere almeno 14 anni per usare questo servizio.');
+      return;
+    }
+    if (!isLogin && !isForgot && !hasStrongPassword(password)) {
+      setError(PASSWORD_RULE_MESSAGE);
       return;
     }
 
@@ -100,7 +141,7 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
     }
 
     const endpoint = isLogin ? '/api/login' : '/api/register';
-    const body = isLogin ? { email, password } : { email, password, name };
+    const body = isLogin ? { email, password } : { email, password, name, privacyAccepted, healthConsent, ageConfirmed };
 
     try {
       const res = await fetch(endpoint, {
@@ -184,6 +225,8 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
                   placeholder="••••••••"
                   value={password} 
                   onChange={(e) => setPassword(e.target.value)}
+                  minLength={!isLogin ? 8 : undefined}
+                  title={!isLogin ? PASSWORD_RULE_MESSAGE : undefined}
                   required
                 />
                 <button 
@@ -198,18 +241,46 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
             </div>
           )}
           {!isLogin && !isForgot && (
-            <div className="flex items-start gap-3 mt-4">
-              <input 
-                type="checkbox" 
-                id="privacy" 
-                checked={privacyAccepted} 
-                onChange={(e) => setPrivacyAccepted(e.target.checked)} 
-                className="mt-1"
-                required
-              />
-              <label htmlFor="privacy" className="text-[10px] text-zinc-500 uppercase tracking-widest leading-relaxed">
-                Ho letto e accetto la <a href="/privacy" className="text-accent hover:underline">Privacy Policy</a>, compreso il trattamento dei dati personali relativi alla salute.
-              </label>
+            <div className="space-y-4 mt-4">
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="privacy"
+                  checked={privacyAccepted}
+                  onChange={(e) => setPrivacyAccepted(e.target.checked)}
+                  className="mt-1"
+                  required
+                />
+                <label htmlFor="privacy" className="text-[10px] text-zinc-500 uppercase tracking-widest leading-relaxed">
+                  Ho letto e accetto la <a href="/privacy-policy" className="text-accent hover:underline">Privacy Policy</a>.
+                </label>
+              </div>
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="health-consent"
+                  checked={healthConsent}
+                  onChange={(e) => setHealthConsent(e.target.checked)}
+                  className="mt-1"
+                  required
+                />
+                <label htmlFor="health-consent" className="text-[10px] text-zinc-500 uppercase tracking-widest leading-relaxed">
+                  Acconsento esplicitamente al trattamento dei miei dati relativi alla salute, inclusi peso, altezza e condizioni di salute, per ricevere programmi di fitness/coaching personalizzati.
+                </label>
+              </div>
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="age-confirmed"
+                  checked={ageConfirmed}
+                  onChange={(e) => setAgeConfirmed(e.target.checked)}
+                  className="mt-1"
+                  required
+                />
+                <label htmlFor="age-confirmed" className="text-[10px] text-zinc-500 uppercase tracking-widest leading-relaxed">
+                  Dichiaro di avere almeno 14 anni.
+                </label>
+              </div>
             </div>
           )}
           {error && <p className="text-red-400 text-[10px] font-black uppercase tracking-widest text-center">{error}</p>}
@@ -245,6 +316,11 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
               Torna al Login
             </button>
           )}
+          <div className="flex items-center justify-center gap-3 pt-4">
+            <a href="/privacy-policy" className="text-[10px] text-zinc-600 hover:text-accent transition-colors font-black uppercase tracking-widest">Privacy Policy</a>
+            <span className="text-zinc-700 text-[10px]">|</span>
+            <a href="/terms" className="text-[10px] text-zinc-600 hover:text-accent transition-colors font-black uppercase tracking-widest">Termini</a>
+          </div>
         </div>
       </motion.div>
     </div>
@@ -264,6 +340,7 @@ const ResetPassword = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password !== confirm) return setError('Le password non coincidono');
+    if (!hasStrongPassword(password)) return setError(PASSWORD_RULE_MESSAGE);
     setLoading(true);
     setError('');
 
@@ -298,7 +375,7 @@ const ResetPassword = () => {
             <div className="relative">
               <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 ml-1">Password</label>
               <div className="relative">
-                <input type={showPwd1 ? "text" : "password"} className="input-field pr-14" value={password} onChange={e => setPassword(e.target.value)} required />
+                <input type={showPwd1 ? "text" : "password"} className="input-field pr-14" value={password} onChange={e => setPassword(e.target.value)} minLength={8} title={PASSWORD_RULE_MESSAGE} required />
                 <button 
                   type="button"
                   onClick={() => setShowPwd1(!showPwd1)}
@@ -342,7 +419,7 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
     fetch(`/api/messages/${currentUser.id}?otherId=${otherUser.id}`)
       .then(res => res.json())
       .then(data => {
-        setMessages(data);
+        setMessages(Array.isArray(data) ? data : []);
         // Mark as read
         fetch('/api/messages/read', {
           method: 'PATCH',
@@ -521,7 +598,7 @@ const Notifications = ({ coachId, onReply, onBack, theme, fullView = false }: { 
     const endpoint = fullView ? `/api/notifications/full/${coachId}` : `/api/notifications/${coachId}`;
     fetch(endpoint)
       .then(res => res.json())
-      .then(setNotifications);
+      .then(data => setNotifications(Array.isArray(data) ? data : []));
   }, [coachId, fullView]);
 
   return (
@@ -888,7 +965,7 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
                   {items.map((item, i) => (
                     <div key={i} className={`flex justify-between items-center p-4 rounded-2xl border ${theme === 'light' ? 'bg-zinc-50 border-zinc-100' : 'bg-white/5 border-white/5'}`}>
                       <span className={`font-bold text-lg uppercase italic ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{item.exercise_name}</span>
-                      <span className="text-accent font-black tracking-tighter">{item.sets} x {item.reps}</span>
+                      <span className="text-accent font-black tracking-tighter">{formatExerciseLoad(item)}</span>
                     </div>
                   ))}
                 </div>
@@ -967,7 +1044,7 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
                     <button
                       key={ex.id}
                       onClick={() => {
-                        setModelItems([...modelItems, { exercise_name: ex.name, category: ex.category || '', day: 'Giorno A', sets: '', reps: '', pt_notes: '' }]);
+                        setModelItems([...modelItems, { exercise_name: ex.name, category: ex.category || '', day: 'Giorno A', sets: '', reps: '', weight: '', recovery: '', notes: '', pt_notes: '' }]);
                         setExerciseSearch('');
                       }}
                       className={`w-full text-left p-6 rounded-3xl flex items-center justify-between group transition-all ${theme === 'light' ? 'hover:bg-zinc-50' : 'hover:bg-white/5'}`}
@@ -1030,7 +1107,7 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
                             </button>
                           </div>
                           
-                          <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+                          <div className="grid grid-cols-1 md:grid-cols-6 gap-6">
                             <div className="md:col-span-1">
                               <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 block ml-1">Giorno</label>
                               <select 
@@ -1049,23 +1126,32 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
                               </select>
                             </div>
 
-                            <div className="md:col-span-1 flex gap-2">
+                            <div className="md:col-span-2 flex gap-2">
                               <div className="flex-1 min-w-0">
                                 <label className="text-[10px] font-black text-zinc-500 uppercase mb-2 block ml-1">Set</label>
                                 <input 
                                   placeholder="3"
                                   className={`input-field text-center font-black text-xl py-4 px-2 border transition-all ${theme === 'light' ? 'bg-zinc-50 border-zinc-200' : 'bg-black/40 border-white/5'}`} 
                                   value={item.sets} 
-                                  onChange={e => { const updated = [...modelItems]; updated[item.originalIndex].sets = e.target.value; setModelItems(updated); }} 
+                                  onChange={e => { const updated = [...modelItems]; updated[item.originalIndex].sets = e.target.value; setModelItems(updated); }}
                                 />
                               </div>
                               <div className="flex-1 min-w-0">
                                 <label className="text-[10px] font-black text-zinc-500 uppercase mb-2 block ml-1">Rip</label>
-                                <input 
+                                <input
                                   placeholder="12"
-                                  className={`input-field text-center font-black text-xl py-4 px-2 border transition-all ${theme === 'light' ? 'bg-zinc-50 border-zinc-200' : 'bg-black/40 border-white/5'}`} 
-                                  value={item.reps} 
-                                  onChange={e => { const updated = [...modelItems]; updated[item.originalIndex].reps = e.target.value; setModelItems(updated); }} 
+                                  className={`input-field text-center font-black text-xl py-4 px-2 border transition-all ${theme === 'light' ? 'bg-zinc-50 border-zinc-200' : 'bg-black/40 border-white/5'}`}
+                                  value={item.reps}
+                                  onChange={e => { const updated = [...modelItems]; updated[item.originalIndex].reps = e.target.value; setModelItems(updated); }}
+                                />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <label className="text-[10px] font-black text-zinc-500 uppercase mb-2 block ml-1">Kg</label>
+                                <input
+                                  placeholder="20"
+                                  className={`input-field text-center font-black text-xl py-4 px-2 border transition-all ${theme === 'light' ? 'bg-zinc-50 border-zinc-200' : 'bg-black/40 border-white/5'}`}
+                                  value={item.weight || ''}
+                                  onChange={e => { const updated = [...modelItems]; updated[item.originalIndex].weight = e.target.value; setModelItems(updated); }}
                                 />
                               </div>
                             </div>
@@ -1158,7 +1244,7 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
                         <h4 className={`text-3xl font-display font-black italic uppercase ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{item.exercise_name}</h4>
                       </div>
                       <div className="flex flex-col items-end">
-                        <span className="text-3xl font-black italic text-accent">{item.sets} x {item.reps}</span>
+                        <span className="text-3xl font-black italic text-accent">{formatExerciseLoad(item)}</span>
                         <span className="text-xs font-bold text-zinc-500 italic mt-1">{item.pt_notes}</span>
                       </div>
                     </div>
@@ -1261,7 +1347,7 @@ const LoadModelView = ({ models, onSelect, onBack, theme }: { models: ModelPlan[
   const handleSelect = async (modelId: number) => {
     const res = await fetch(`/api/models/${modelId}/items`);
     const items = await res.json();
-    onSelect(items);
+    onSelect(Array.isArray(items) ? items : []);
   };
 
   return (
@@ -1309,7 +1395,7 @@ const PlanHistory = ({ userId, clientName, onLoadPlan, onBack, theme }: { userId
     fetch(`/api/plans/${userId}/history`)
       .then(res => res.json())
       .then(data => {
-        setHistory(data);
+        setHistory(Array.isArray(data) ? data : []);
         setLoading(false);
       });
   };
@@ -1379,7 +1465,7 @@ const PlanHistory = ({ userId, clientName, onLoadPlan, onBack, theme }: { userId
                           <div key={i} className={`flex flex-col gap-1 p-4 rounded-2xl border ${theme === 'light' ? 'bg-zinc-50/50 border-zinc-100' : 'bg-black/40 border-white/5'}`}>
                             <div className="flex items-center justify-between">
                               <p className={`font-medium ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-300'}`}>
-                                <strong className="uppercase italic tracking-tight">{item.exercise_name}</strong>: {item.sets} x {item.reps}
+                                <strong className="uppercase italic tracking-tight">{item.exercise_name}</strong>: {formatExerciseLoad(item)}
                               </p>
                               {item.pt_notes && <span className="text-xs text-zinc-400 italic">Note PT: {item.pt_notes}</span>}
                             </div>
@@ -1437,7 +1523,7 @@ const PlanPreview = ({ items, clientName, onBack, theme }: { items: PlanItem[], 
       doc.setFontSize(12);
       
       dayItems.forEach((item) => {
-        const text = `• ${item.exercise_name}: ${item.sets} x ${item.reps} ${item.pt_notes ? `(${item.pt_notes})` : ''}`;
+        const text = `- ${item.exercise_name}: ${formatExerciseLoad(item)} ${item.pt_notes ? `(${item.pt_notes})` : ''}`;
         const splitText = doc.splitTextToSize(text, 170);
         doc.text(splitText, 25, y);
         y += splitText.length * 7;
@@ -1513,8 +1599,8 @@ const PlanPreview = ({ items, clientName, onBack, theme }: { items: PlanItem[], 
                   <li key={idx} className="flex items-start gap-3 text-lg font-medium">
                     <span className="text-blue-600 font-black mt-1">•</span>
                     <span>
-                      <strong className={`uppercase italic tracking-tight ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{item.exercise_name}</strong> 
-                      <span className={`ml-2 ${theme === 'light' ? 'text-zinc-700' : 'text-zinc-400'}`}>{item.sets} x {item.reps}</span> 
+                      <strong className={`uppercase italic tracking-tight ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{item.exercise_name}</strong>
+                      <span className={`ml-2 ${theme === 'light' ? 'text-zinc-700' : 'text-zinc-400'}`}>{formatExerciseLoad(item)}</span>
                       {item.pt_notes && <span className="text-zinc-400 italic ml-2">({item.pt_notes})</span>}
                     </span>
                   </li>
@@ -1920,13 +2006,12 @@ const PTHome = ({ user, theme, onAthleteClick, onNotificationsClick }: { user: U
     return <Chat currentUser={user} otherUser={chatUser} onBack={() => setView('home')} theme={theme} />;
   }
 
-  const expiringAthletes = clients.filter(c => {
-    if (!c.contract_end) return false;
-    const end = new Date(c.contract_end);
-    const now = new Date();
-    const diff = end.getTime() - now.getTime();
-    return diff > 0 && diff < (7 * 1000 * 60 * 60 * 24); // next 7 days
-  });
+  const expiringAthletes = clients
+    .filter(c => {
+      const daysLeft = getDaysRemaining(c.contract_end);
+      return daysLeft !== null && daysLeft <= 7;
+    })
+    .sort((a, b) => (getDaysRemaining(a.contract_end) ?? 999) - (getDaysRemaining(b.contract_end) ?? 999));
 
   const recentAthletes = [...clients]
     .sort((a, b) => {
@@ -1975,17 +2060,27 @@ const PTHome = ({ user, theme, onAthleteClick, onNotificationsClick }: { user: U
 
           <section className="space-y-6">
             <h3 className="text-xs font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center gap-3">
-              <AlertCircle className="w-4 h-4 text-red-500" /> Contratti in Scadenza (7gg)
+              <AlertCircle className="w-4 h-4 text-red-500" /> Contratti Scaduti / in Scadenza
             </h3>
-            {expiringAthletes.length > 0 ? expiringAthletes.map(athlete => (
+            {expiringAthletes.length > 0 ? expiringAthletes.map(athlete => {
+              const daysLeft = getDaysRemaining(athlete.contract_end);
+              const label = daysLeft === null
+                ? ''
+                : daysLeft < 0
+                  ? `Scaduto da ${Math.abs(daysLeft)} giorni`
+                  : daysLeft === 0
+                    ? 'Scade oggi'
+                    : `Scade in ${daysLeft} giorni`;
+              return (
                 <div key={athlete.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0 grow">
                   <div className="flex items-center gap-3">
                     <Clock className={`w-4 h-4 ${theme === 'dark' ? 'text-accent' : 'text-zinc-900'}`} />
                     <p className={`font-black uppercase tracking-widest text-[10px] ${theme === 'dark' ? 'text-white' : 'text-zinc-900'}`}>{athlete.name}</p>
                   </div>
-                  <p className="text-red-500 text-[10px] font-black uppercase tracking-widest">Scade in {getDaysRemaining(athlete.contract_end)} giorni</p>
+                  <p className="text-red-500 text-[10px] font-black uppercase tracking-widest">{label}</p>
                 </div>
-              )) : (
+              );
+            }) : (
                 <p className="text-zinc-500 font-bold uppercase tracking-widest text-[8px] italic">Nessun contratto in scadenza.</p>
               )}
           </section>
@@ -2015,6 +2110,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
 
   const [newPlanItems, setNewPlanItems] = useState<PlanItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [exercisePickerDay, setExercisePickerDay] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState<'editor' | 'library' | 'models' | 'history' | 'preview' | 'chat' | 'load_model' | 'bio'>('bio');
   const [editingAthlete, setEditingAthlete] = useState<User | null>(null);
@@ -2022,6 +2118,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
   const [unreadCount, setUnreadCount] = useState(0);
   const [athleteActionMenu, setAthleteActionMenu] = useState<User | null>(null);
   const infoRef = React.useRef<HTMLDivElement>(null);
+  const exerciseSearchRef = React.useRef<HTMLInputElement>(null);
   const [lastScrollPos, setLastScrollPos] = useState(() => {
     const saved = sessionStorage.getItem('pt_athlete_list_scroll');
     return saved ? parseInt(saved) : 0;
@@ -2108,12 +2205,12 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
   const fetchUnread = () => {
     fetch(`/api/notifications/${pt.id}`)
       .then(res => res.json())
-      .then(data => setUnreadCount(data.length));
+      .then(data => setUnreadCount(Array.isArray(data) ? data.length : 0));
   };
 
   useEffect(() => {
     fetchUnread();
-    const interval = setInterval(fetchUnread, 10000);
+    const interval = setInterval(fetchUnread, 5000);
     return () => clearInterval(interval);
   }, [pt.id]);
 
@@ -2146,19 +2243,28 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
 
   const handleDeleteAthlete = async (id: number) => {
     if (!confirm('Sei sicuro di voler eliminare questo atleta e tutti i suoi dati?')) return;
-    await fetch(`/api/users/${id}`, { method: 'DELETE' });
-    if (selectedClient?.id === id) setSelectedClient(null);
+    const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      alert('Errore durante l\'eliminazione dell\'atleta');
+      return;
+    }
+    setAthleteActionMenu(null);
+    if (selectedClient?.id === id) {
+      setSelectedClient(null);
+      setView('bio');
+    }
     refreshClients();
   };
 
   const filteredExercises = useMemo(() => {
-    if (!searchTerm) return [];
-    return exercises.filter(ex => 
-      ex.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    if (!searchTerm.trim() && !exercisePickerDay) return [];
+    if (!searchTerm.trim()) return exercises;
+    return exercises.filter(ex =>
+      ex.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (ex.category || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (ex.muscle_group || '').toLowerCase().includes(searchTerm.toLowerCase())
     );
-  }, [searchTerm, exercises]);
+  }, [searchTerm, exercises, exercisePickerDay]);
 
   const filteredClients = useMemo(() => {
     let result = clients.filter(c => c.name.toLowerCase().includes(athleteSearch.toLowerCase()));
@@ -2176,12 +2282,16 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
     setNewPlanItems([...newPlanItems, {
       exercise_name: ex.name,
       category: ex.category,
-      day: 'Giorno A',
+      day: exercisePickerDay || 'Giorno A',
       sets: '',
       reps: '',
+      weight: '',
+      recovery: '',
+      notes: '',
       pt_notes: ''
     }]);
     setSearchTerm('');
+    setExercisePickerDay(null);
   };
 
   const removeExercise = (index: number) => {
@@ -2256,7 +2366,10 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
             day: item.day,
             sets: item.sets,
             reps: item.reps,
-            pt_notes: item.pt_notes
+            weight: item.weight || '',
+            recovery: item.recovery || '',
+            notes: item.notes || '',
+            pt_notes: item.pt_notes || ''
           })));
           setView('editor');
         }}
@@ -2278,6 +2391,9 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
             day: item.day,
             sets: item.sets,
             reps: item.reps,
+            weight: item.weight || '',
+            recovery: item.recovery || '',
+            notes: item.notes || '',
             pt_notes: item.pt_notes || ''
           }));
           setNewPlanItems([...newPlanItems, ...cleanedItems]);
@@ -2381,7 +2497,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                         <div className={`absolute -top-2 -right-2 px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-lg text-[7px] sm:text-[8px] font-black uppercase tracking-tighter shadow-md ${
                           daysLeft <= 7 ? 'bg-red-500 text-white animate-pulse' : (theme === 'dark' ? 'bg-zinc-900 text-accent' : 'bg-white text-zinc-900 border border-zinc-200')
                         }`}>
-                          {daysLeft}g
+                          {daysLeft < 0 ? 'scad.' : `${daysLeft}g`}
                         </div>
                       )}
                     </div>
@@ -2819,29 +2935,39 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
             {/* Quick Search */}
             <div className="relative">
               <input
+                ref={exerciseSearchRef}
                 type="text"
                 placeholder="Cerca esercizio (es. panca, squat, schiena, bicipiti...)"
-                className="input-field pl-8 py-6 bg-zinc-900/80 border-white/5 focus:bg-zinc-900 text-xl font-bold rounded-[2rem]"
+                className={`input-field pl-8 py-6 text-xl font-bold rounded-[2rem] ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900' : 'bg-zinc-900/80 border-white/5 focus:bg-zinc-900 text-white'}`}
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onFocus={() => setExercisePickerDay(prev => prev || 'Giorno A')}
+                onChange={(e) => {
+                  setExercisePickerDay(prev => prev || 'Giorno A');
+                  setSearchTerm(e.target.value);
+                }}
               />
+              {exercisePickerDay && (
+                <p className="mt-3 ml-2 text-[10px] font-black uppercase tracking-widest text-accent">
+                  Aggiunta a: {exercisePickerDay}
+                </p>
+              )}
               <AnimatePresence>
-                {searchTerm && (
-                  <motion.div 
+                {(searchTerm || exercisePickerDay) && (
+                  <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="absolute z-10 w-full mt-4 bg-zinc-900 border border-white/10 rounded-[2.5rem] shadow-2xl max-h-96 overflow-y-auto p-4 backdrop-blur-2xl"
+                    className={`absolute z-10 w-full mt-4 border rounded-[2.5rem] shadow-2xl max-h-96 overflow-y-auto p-4 backdrop-blur-2xl ${theme === 'light' ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-white/10'}`}
                   >
                     {filteredExercises.length > 0 ? (
                       filteredExercises.map(ex => (
                         <button
                           key={ex.id}
                           onClick={() => addExercise(ex)}
-                          className="w-full text-left p-5 hover:bg-white/5 rounded-2xl flex items-center justify-between group transition-all"
+                          className={`w-full text-left p-5 rounded-2xl flex items-center justify-between group transition-all ${theme === 'light' ? 'hover:bg-zinc-50' : 'hover:bg-white/5'}`}
                         >
                           <div>
-                            <p className="font-black text-xl italic uppercase tracking-tighter text-white">{ex.name}</p>
+                            <p className={`font-black text-xl italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{ex.name}</p>
                             <p className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">{ex.category}</p>
                           </div>
                           <div className="w-12 h-12 rounded-xl bg-accent flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg shadow-accent/20">
@@ -2899,7 +3025,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                         <div className="flex justify-between items-start">
                           <div>
                             <span className="text-[10px] font-black text-accent uppercase tracking-[0.2em] block mb-2">{item.category}</span>
-                            <p className="font-black text-3xl italic uppercase tracking-tighter text-white">{item.exercise_name}</p>
+                            <p className={`font-black text-3xl italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>{item.exercise_name}</p>
                           </div>
                           <button 
                             onClick={() => removeExercise(item.originalIndex)}
@@ -2909,7 +3035,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                           </button>
                         </div>
                         
-                        <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-6 gap-6">
                           <div className="md:col-span-1">
                             <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2 block ml-1">Giorno</label>
                             <select 
@@ -2927,7 +3053,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                               <option value="Giorno D">Giorno D</option>
                             </select>
                           </div>
-                          <div className="md:col-span-1 flex gap-2">
+                          <div className="md:col-span-2 flex gap-2">
                             <div className="flex-1 min-w-0">
                               <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2 block ml-1">Set</label>
                               <input 
@@ -2943,13 +3069,26 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                             </div>
                             <div className="flex-1 min-w-0">
                               <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2 block ml-1">Rip</label>
-                              <input 
-                                placeholder="12" 
+                              <input
+                                placeholder="12"
                                 className="input-field text-center font-black text-xl py-4 px-2"
                                 value={item.reps}
                                 onChange={(e) => {
                                   const updated = [...newPlanItems];
                                   updated[item.originalIndex].reps = e.target.value;
+                                  setNewPlanItems(updated);
+                                }}
+                              />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2 block ml-1">Kg</label>
+                              <input
+                                placeholder="20"
+                                className="input-field text-center font-black text-xl py-4 px-2"
+                                value={item.weight || ''}
+                                onChange={(e) => {
+                                  const updated = [...newPlanItems];
+                                  updated[item.originalIndex].weight = e.target.value;
                                   setNewPlanItems(updated);
                                 }}
                               />
@@ -3002,7 +3141,12 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                       
                       {/* Add Exercise Button under the last one in the day */}
                       <button 
-                        onClick={() => setSearchTerm('')} // This just focuses search or we can make it open search
+                        onClick={() => {
+                          setExercisePickerDay(day);
+                          setSearchTerm('');
+                          exerciseSearchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          setTimeout(() => exerciseSearchRef.current?.focus(), 100);
+                        }}
                         className="w-full py-8 border-2 border-dashed border-white/5 rounded-[3rem] text-zinc-700 hover:text-accent hover:border-accent/20 hover:bg-accent/5 transition-all flex flex-col items-center justify-center gap-3 group"
                       >
                         <div className="w-12 h-12 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center group-hover:bg-accent group-hover:border-accent transition-all">
@@ -3036,12 +3180,13 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
   );
 };
 
-const UserProfile = ({ user, onBack, theme }: { user: User, onBack: () => void, theme?: 'dark' | 'light' }) => {
+const UserProfile = ({ user, onBack, theme, onAccountDeleted }: { user: User, onBack: () => void, theme?: 'dark' | 'light', onAccountDeleted: () => void }) => {
   const [email, setEmail] = useState(user.email);
   const [name, setName] = useState(user.name);
-  const [age, setAge] = useState(user.age || 0);
-  const [experience_years, setExperienceYears] = useState(user.experience_years || 0);
+  const [age, setAge] = useState(user.age ? String(user.age) : '');
+  const [experience_years, setExperienceYears] = useState(user.experience_years ? String(user.experience_years) : '');
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3050,7 +3195,12 @@ const UserProfile = ({ user, onBack, theme }: { user: User, onBack: () => void, 
       const res = await fetch(`/api/users/${user.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, age, experience_years }),
+        body: JSON.stringify({
+          name,
+          email,
+          age: age ? Number(age) : null,
+          experience_years: experience_years ? Number(experience_years) : null
+        }),
       });
       if (res.ok) {
         alert('Profilo aggiornato! Effettua nuovamente il login per vedere le modifiche.');
@@ -3060,6 +3210,24 @@ const UserProfile = ({ user, onBack, theme }: { user: User, onBack: () => void, 
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!window.confirm('Sei sicuro di voler eliminare il tuo account? Questa azione è permanente e cancellerà i tuoi dati personali, i dati relativi alla salute e il tuo programma.')) return;
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/user', { method: 'DELETE' });
+      if (res.ok) {
+        alert('Account eliminato con successo.');
+        onAccountDeleted();
+      } else {
+        alert('Errore durante l\'eliminazione dell\'account.');
+      }
+    } catch {
+      alert('Errore durante l\'eliminazione dell\'account.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -3090,11 +3258,11 @@ const UserProfile = ({ user, onBack, theme }: { user: User, onBack: () => void, 
         <div className="grid grid-cols-2 gap-8">
           <div>
             <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 block ml-1">Età</label>
-            <input type="number" className="input-field" value={age || ''} onChange={e => setAge(parseInt(e.target.value))} />
+            <input type="number" min={14} className="input-field" value={age} onChange={e => setAge(e.target.value)} />
           </div>
           <div>
             <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 block ml-1">Anni di Esperienza</label>
-            <input type="number" className="input-field" value={experience_years || ''} onChange={e => setExperienceYears(parseInt(e.target.value))} />
+            <input type="number" min={0} className="input-field" value={experience_years} onChange={e => setExperienceYears(e.target.value)} />
           </div>
         </div>
 
@@ -3102,11 +3270,21 @@ const UserProfile = ({ user, onBack, theme }: { user: User, onBack: () => void, 
           {loading ? 'Salvataggio...' : 'Salva Modifiche'}
         </button>
       </form>
+
+      <div className="glass p-10 rounded-[3rem] space-y-5 max-w-2xl">
+        <div>
+          <h3 className={`text-2xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Elimina account</h3>
+          <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px] mt-2">Azione permanente sui dati del tuo profilo</p>
+        </div>
+        <button type="button" disabled={deleting} onClick={handleDeleteAccount} className="w-full py-5 rounded-2xl bg-red-500/10 text-red-500 border border-red-500/20 font-black uppercase tracking-widest text-xs hover:bg-red-500 hover:text-white transition-all">
+          {deleting ? 'Eliminazione...' : 'Elimina account'}
+        </button>
+      </div>
     </div>
   );
 };
 
-const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }) => {
+const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 'dark' | 'light', onAccountDeleted: () => void }) => {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'dashboard' | 'contact' | 'chat' | 'profile' | 'notifications'>('dashboard');
@@ -3118,10 +3296,10 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
     const fetchUnread = () => {
       fetch(`/api/notifications/${user.id}`)
         .then(res => res.json())
-        .then(data => setUnreadCount(data.length));
+        .then(data => setUnreadCount(Array.isArray(data) ? data.length : 0));
     };
     fetchUnread();
-    const interval = setInterval(fetchUnread, 10000);
+    const interval = setInterval(fetchUnread, 5000);
     return () => clearInterval(interval);
   }, [user.id]);
 
@@ -3211,6 +3389,7 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
       return acc;
     }, {} as Record<string, PlanItem[]>);
   }, [plan]);
+  const contractExpired = isContractExpired(user.contract_end);
 
   const downloadPDF = () => {
     if (!plan) return;
@@ -3236,7 +3415,7 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
       doc.setFontSize(12);
       
       dayItems.forEach((item) => {
-        const text = `• ${item.exercise_name}: ${item.sets} x ${item.reps} ${item.pt_notes ? `(${item.pt_notes})` : ''}`;
+        const text = `- ${item.exercise_name}: ${formatExerciseLoad(item)} ${item.pt_notes ? `(${item.pt_notes})` : ''}`;
         const splitText = doc.splitTextToSize(text, 170);
         doc.text(splitText, 25, y);
         y += splitText.length * 7;
@@ -3252,7 +3431,7 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
   };
 
   if (view === 'profile') {
-    return <UserProfile user={user} onBack={() => setView('dashboard')} theme={theme} />;
+    return <UserProfile user={user} onBack={() => setView('dashboard')} theme={theme} onAccountDeleted={onAccountDeleted} />;
   }
 
   if (view === 'notifications') {
@@ -3289,21 +3468,21 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
               </div>
             )}
           </div>
-          {plan && (
-            <div className="flex items-center gap-4">
-              <div className="bg-accent text-black px-8 py-4 rounded-2xl flex items-center gap-3 shadow-xl shadow-accent/20 w-fit">
-                <CheckCircle2 className="w-6 h-6" />
-                <span className="text-xs font-black uppercase tracking-widest">Programma Attivo</span>
+          <div className="flex items-center gap-4">
+            {plan && (
+              <div className={`${contractExpired ? 'bg-red-500 text-white shadow-red-500/20' : 'bg-emerald-500 text-white shadow-emerald-500/20'} px-8 py-4 rounded-2xl flex items-center gap-3 shadow-xl w-fit`}>
+                {contractExpired ? <AlertCircle className="w-6 h-6" /> : <CheckCircle2 className="w-6 h-6" />}
+                <span className="text-xs font-black uppercase tracking-widest">{contractExpired ? 'Programma Scaduto' : 'Programma Attivo'}</span>
               </div>
-              <button 
-                onClick={() => setView('profile')}
-                className={`w-14 h-14 flex items-center justify-center border rounded-2xl transition-all hover:shadow-lg ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900 hover:bg-zinc-100' : 'bg-zinc-900 border-white/10 text-accent hover:bg-white/5'}`}
-                title="Impostazioni Profilo"
-              >
-                <Settings className="w-6 h-6" />
-              </button>
-            </div>
-          )}
+            )}
+            <button
+              onClick={() => setView('profile')}
+              className={`w-14 h-14 flex items-center justify-center border rounded-2xl transition-all hover:shadow-lg ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900 hover:bg-zinc-100' : 'bg-zinc-900 border-white/10 text-accent hover:bg-white/5'}`}
+              title="Impostazioni Profilo"
+            >
+              <Settings className="w-6 h-6" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -3364,7 +3543,7 @@ const UserDashboard = ({ user, theme }: { user: User, theme?: 'dark' | 'light' }
 
                       <div className="flex flex-col items-center justify-center text-center w-full">
                         <p className="text-xl sm:text-2xl font-black italic text-zinc-500 mb-4">
-                          {item.sets} x {item.reps} {item.pt_notes && <span className="text-accent/60 ml-2">({item.pt_notes})</span>}
+                          {formatExerciseLoad(item)} {item.pt_notes && <span className="text-accent/60 ml-2">({item.pt_notes})</span>}
                         </p>
                         
                         {item.user_notes && (
@@ -3670,6 +3849,108 @@ const PrivacyPolicy = ({ settings, theme }: any) => {
   );
 };
 
+const LegalPrivacyPolicy = ({ settings, theme }: any) => {
+  const [lang, setLang] = useState<'it' | 'en'>('it');
+  const ownerName = settings?.privacy_owner_name || 'Bellu Riccardo';
+  const ownerEmail = settings?.privacy_owner_email || 'belluriccardo@gmail.com';
+
+  return (
+    <div className={`min-h-screen py-20 px-6 ${theme === 'dark' ? 'bg-black text-white' : 'bg-zinc-50 text-zinc-900'}`}>
+      <div className="max-w-4xl mx-auto space-y-12">
+        <div className="flex justify-between items-center">
+          <a href="/" className={`inline-flex items-center gap-2 font-black uppercase tracking-widest text-xs transition-colors ${theme === 'dark' ? 'text-zinc-500 hover:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>
+            <ArrowLeft className="w-4 h-4" /> {lang === 'it' ? 'Torna alla Home' : 'Back to Home'}
+          </a>
+          <button onClick={() => setLang(lang === 'it' ? 'en' : 'it')} className={`px-4 py-2 text-xs font-black uppercase tracking-widest rounded-xl border transition-all ${theme === 'dark' ? 'text-zinc-300 border-white/10 hover:bg-white/5' : 'text-zinc-700 border-zinc-200 hover:bg-zinc-100'}`}>
+            {lang === 'it' ? 'EN' : 'IT'}
+          </button>
+        </div>
+        <h1 className="text-5xl font-display font-black italic uppercase tracking-tighter text-accent">Privacy Policy</h1>
+        <div className={`glass p-12 rounded-[3.5rem] space-y-8 text-sm md:text-base leading-relaxed ${theme === 'dark' ? 'text-zinc-300' : 'text-zinc-700'}`}>
+          {lang === 'it' ? (
+            <>
+              <p><strong>Titolare del Trattamento:</strong> {ownerName}, Via Gradisca 10, Varese, Italia. Email: <a href={`mailto:${ownerEmail}`} className="text-accent hover:underline">{ownerEmail}</a>. P.IVA: XXXX.</p>
+              <p><strong>Dati raccolti:</strong> nome, cognome, email, password salvata solo in forma hash, peso, altezza e condizioni di salute inseriti dal coach/admin dopo il consulto. Possono inoltre essere trattati log tecnici essenziali come IP, timestamp, endpoint, user-agent e status code.</p>
+              <p><strong>Finalita del trattamento:</strong> gestione account, accesso al programma personale, creazione e gestione di programmi di allenamento personalizzati, sicurezza del servizio, prevenzione abusi e reset password tramite email.</p>
+              <p><strong>Base giuridica:</strong> consenso dell'utente ai sensi dell'art. 6 GDPR, consenso esplicito ai sensi dell'art. 9 GDPR per i dati relativi alla salute e legittimo interesse per sicurezza tecnica, prevenzione abusi e log tecnici essenziali.</p>
+              <p><strong>Minori:</strong> il servizio non e destinato a utenti sotto i 14 anni. Gli utenti sotto i 14 anni non possono registrarsi o usare il servizio. In Italia, per i servizi online, i minori di almeno 14 anni possono prestare il consenso al trattamento dei dati personali. Se il Titolare viene a conoscenza della raccolta di dati di un utente sotto i 14 anni, l'account e i dati collegati saranno eliminati.</p>
+              <p><strong>Fornitori:</strong> hosting su Render, database su Turso, email e reset password tramite Brevo. Se i fornitori trattano dati fuori dallo Spazio Economico Europeo, devono applicarsi garanzie adeguate, incluse le Clausole Contrattuali Standard ove richiesto.</p>
+              <p><strong>Conservazione:</strong> i dati account e relativi alla salute sono conservati per la durata del rapporto di coaching. In caso di richiesta o eliminazione account, i dati sono cancellati immediatamente salvo obblighi legali o tecnici. I log tecnici sono conservati per massimo 30 giorni e non devono includere password, token, dati salute o payload sensibili.</p>
+              <p><strong>Diritti dell'utente:</strong> accesso, rettifica, cancellazione, opposizione, limitazione, portabilita e revoca del consenso. Per esercitare i diritti scrivi a <a href={`mailto:${ownerEmail}`} className="text-accent hover:underline">{ownerEmail}</a>.</p>
+              <p><strong>Diritto di reclamo:</strong> puoi presentare reclamo al Garante per la Protezione dei Dati Personali su <a href="https://www.garanteprivacy.it" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline transition-all">www.garanteprivacy.it</a>.</p>
+              <p><strong>Sicurezza:</strong> il sito usa misure tecniche ragionevoli, tra cui HTTPS, password salvate in forma hash, accesso protetto agli account e controlli di accesso.</p>
+              <p><strong>Disclaimer salute:</strong> il servizio offre programmi di coaching e allenamento fitness e non sostituisce consulenza medica. In caso di patologie, dubbi o condizioni fisiche particolari, consulta un medico o professionista sanitario prima di seguire un programma di allenamento.</p>
+              <p className="pt-8 border-t border-white/10 text-xs italic opacity-80">Ultimo aggiornamento: 5 maggio 2026</p>
+            </>
+          ) : (
+            <>
+              <p><strong>Data Controller:</strong> {ownerName}, Via Gradisca 10, Varese, Italy. Email: <a href={`mailto:${ownerEmail}`} className="text-accent hover:underline">{ownerEmail}</a>. VAT number: XXXX.</p>
+              <p><strong>Data collected:</strong> first name, last name, email, password stored only as a hash, weight, height and health conditions entered by the coach/admin after consultation. Essential technical logs may also be processed, such as IP address, timestamp, endpoint, user-agent and status code.</p>
+              <p><strong>Purposes:</strong> account management, access to the personal program, creation and management of personalized training programs, service security, abuse prevention and password reset by email.</p>
+              <p><strong>Legal basis:</strong> user consent under Article 6 GDPR, explicit consent under Article 9 GDPR for health-related data, and legitimate interest for technical security, abuse prevention and essential technical logs.</p>
+              <p><strong>Minors:</strong> the service is not intended for users under 14 years old. Users under 14 may not register or use the service. In Italy, for online services, minors aged 14 or older may give consent to personal data processing. If the Data Controller becomes aware that data from a user under 14 has been collected, the account and related data will be deleted.</p>
+              <p><strong>Providers:</strong> hosting by Render, database by Turso, email and password reset by Brevo. If providers process data outside the EEA, appropriate safeguards, including Standard Contractual Clauses where required, should apply.</p>
+              <p><strong>Retention:</strong> account and health-related data are stored for the duration of the coaching relationship. If the user requests account deletion, data are deleted immediately unless legal or technical obligations require otherwise. Technical logs are retained for a maximum of 30 days and must not include passwords, tokens, health data or sensitive payloads.</p>
+              <p><strong>User rights:</strong> access, correction, deletion, objection, restriction, portability and withdrawal of consent. To exercise these rights, contact <a href={`mailto:${ownerEmail}`} className="text-accent hover:underline">{ownerEmail}</a>.</p>
+              <p><strong>Right to complain:</strong> users may lodge a complaint with the Italian Data Protection Authority at <a href="https://www.garanteprivacy.it" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline transition-all">www.garanteprivacy.it</a>.</p>
+              <p><strong>Security:</strong> the website uses reasonable technical measures, including HTTPS, password hashing, protected account access and access controls.</p>
+              <p><strong>Health disclaimer:</strong> the service provides fitness/coaching/training programs and does not replace medical advice. Users with medical conditions, doubts or specific physical conditions should consult a doctor or healthcare professional before following a training program.</p>
+              <p className="pt-8 border-t border-white/10 text-xs italic opacity-80">Last update: May 5, 2026</p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const TermsPage = ({ theme }: any) => {
+  const [lang, setLang] = useState<'it' | 'en'>('it');
+
+  return (
+    <div className={`min-h-screen py-20 px-6 ${theme === 'dark' ? 'bg-black text-white' : 'bg-zinc-50 text-zinc-900'}`}>
+      <div className="max-w-4xl mx-auto space-y-12">
+        <div className="flex justify-between items-center">
+          <a href="/" className={`inline-flex items-center gap-2 font-black uppercase tracking-widest text-xs transition-colors ${theme === 'dark' ? 'text-zinc-500 hover:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>
+            <ArrowLeft className="w-4 h-4" /> {lang === 'it' ? 'Torna alla Home' : 'Back to Home'}
+          </a>
+          <button onClick={() => setLang(lang === 'it' ? 'en' : 'it')} className={`px-4 py-2 text-xs font-black uppercase tracking-widest rounded-xl border transition-all ${theme === 'dark' ? 'text-zinc-300 border-white/10 hover:bg-white/5' : 'text-zinc-700 border-zinc-200 hover:bg-zinc-100'}`}>
+            {lang === 'it' ? 'EN' : 'IT'}
+          </button>
+        </div>
+        <h1 className="text-5xl font-display font-black italic uppercase tracking-tighter text-accent">{lang === 'it' ? 'Termini di Servizio' : 'Terms of Service'}</h1>
+        <div className={`glass p-12 rounded-[3.5rem] space-y-8 text-sm md:text-base leading-relaxed ${theme === 'dark' ? 'text-zinc-300' : 'text-zinc-700'}`}>
+          {lang === 'it' ? (
+            <>
+              <p><strong>Servizio:</strong> coach-bellu consente agli atleti di accedere al proprio programma fitness/coaching personalizzato. I pagamenti non sono gestiti sul sito.</p>
+              <p><strong>Requisito di eta:</strong> per registrarsi o usare il servizio devi avere almeno 14 anni.</p>
+              <p><strong>Responsabilita dell'utente:</strong> l'utente deve fornire informazioni corrette e mantenere riservate le credenziali del proprio account.</p>
+              <p><strong>Nessuna garanzia di risultato:</strong> i programmi di allenamento possono supportare il percorso dell'utente, ma non garantiscono risultati specifici.</p>
+              <p><strong>Salute e allenamento:</strong> l'utente segue i programmi sotto la propria responsabilita. Il servizio non sostituisce consulenza medica; in presenza di patologie, dubbi o condizioni fisiche particolari, e necessario consultare un medico prima di allenarsi.</p>
+              <p><strong>Uso improprio:</strong> l'uso scorretto del sito o dell'account puo comportare sospensione o cancellazione dell'account.</p>
+              <p><strong>Limitazione di responsabilita:</strong> eventuali limitazioni di responsabilita si applicano nei limiti consentiti dalla legge italiana.</p>
+              <p><strong>Legge applicabile:</strong> si applica la legge italiana, senza limitare i diritti inderogabili riconosciuti ai consumatori.</p>
+              <p className="pt-8 border-t border-white/10 text-xs italic opacity-80">Ultimo aggiornamento: 5 maggio 2026</p>
+            </>
+          ) : (
+            <>
+              <p><strong>Service:</strong> coach-bellu allows athletes to access their personalized fitness/coaching program. Payments are not processed on the website.</p>
+              <p><strong>Age requirement:</strong> users must be at least 14 years old to register or use the service.</p>
+              <p><strong>User responsibility:</strong> users must provide accurate information and keep account credentials confidential.</p>
+              <p><strong>No guaranteed results:</strong> training programs may support the user's progress but do not guarantee specific results.</p>
+              <p><strong>Health and training:</strong> users follow training programs at their own responsibility. The service does not replace medical advice; users with medical conditions, doubts or specific physical conditions must consult a doctor before training.</p>
+              <p><strong>Misuse:</strong> improper use of the website or account may lead to account suspension or deletion.</p>
+              <p><strong>Liability limitation:</strong> any liability limitations apply only within the limits allowed by Italian law.</p>
+              <p><strong>Applicable law:</strong> Italian law applies, without limiting mandatory consumer rights.</p>
+              <p className="pt-8 border-t border-white/10 text-xs italic opacity-80">Last update: May 5, 2026</p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('fitplan_user');
@@ -3759,9 +4040,36 @@ export default function App() {
   useEffect(() => {
     if (user) {
       fetchUnread();
-      const interval = setInterval(fetchUnread, 10000);
+      const interval = setInterval(fetchUnread, 5000);
       return () => clearInterval(interval);
     }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const refreshCurrentUser = async () => {
+      try {
+        const res = await fetch('/api/me');
+        if (!res.ok) return;
+        const freshUser = await res.json();
+        if (cancelled) return;
+        setUser(prev => {
+          if (!prev || prev.id !== freshUser.id) return prev;
+          const next = { ...prev, ...freshUser };
+          localStorage.setItem('fitplan_user', JSON.stringify(next));
+          return next;
+        });
+      } catch {
+        // Keep the cached user if the refresh fails transiently.
+      }
+    };
+    refreshCurrentUser();
+    const interval = setInterval(refreshCurrentUser, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [user?.id]);
 
   const refreshClients = () => fetch('/api/users').then(res => res.json()).then(setClients);
@@ -3782,7 +4090,8 @@ export default function App() {
   }, [user]);
 
   const isResetPage = window.location.pathname === '/reset-password';
-  const isPrivacyPage = window.location.pathname === '/privacy';
+  const isPrivacyPage = window.location.pathname === '/privacy' || window.location.pathname === '/privacy-policy';
+  const isTermsPage = window.location.pathname === '/terms';
 
   useEffect(() => {
     localStorage.setItem('fitplan_theme', theme);
@@ -3816,8 +4125,15 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    fetch('/api/logout', { method: 'POST' }).catch(() => {});
     setUser(null);
     localStorage.removeItem('fitplan_user');
+  };
+
+  const handleAccountDeleted = () => {
+    setUser(null);
+    localStorage.removeItem('fitplan_user');
+    window.location.href = '/';
   };
 
   if (isResetPage) {
@@ -3825,7 +4141,11 @@ export default function App() {
   }
 
   if (isPrivacyPage) {
-    return <PrivacyPolicy settings={settings} theme={theme} />;
+    return <LegalPrivacyPolicy settings={settings} theme={theme} />;
+  }
+
+  if (isTermsPage) {
+    return <TermsPage theme={theme} />;
   }
 
   if (!user) {
@@ -3988,7 +4308,7 @@ export default function App() {
                   onNotificationsClick={() => setActiveTab('notifications')}
                 />
               ) : (
-                <UserDashboard user={user} theme={theme} />
+                <UserDashboard user={user} theme={theme} onAccountDeleted={handleAccountDeleted} />
               )}
             </motion.div>
           ) : activeTab === 'dashboard' ? (
@@ -4023,7 +4343,7 @@ export default function App() {
                   }}
                 />
               ) : (
-                <UserDashboard user={user} theme={theme} />
+                <UserDashboard user={user} theme={theme} onAccountDeleted={handleAccountDeleted} />
               )}
             </motion.div>
           ) : activeTab === 'models' ? (
@@ -4110,7 +4430,13 @@ export default function App() {
       {/* Universal Footer */}
       {!(activeTab === 'dashboard' && user?.role === 'pt') && (
         <footer className="max-w-7xl mx-auto px-4 py-8 text-center border-t border-white/5 pb-28 md:pb-8">
-          <a href="/privacy" className="text-zinc-500 hover:text-accent font-bold text-xs uppercase tracking-widest block mb-2 transition-colors">Privacy Policy</a>
+          <div className="flex flex-wrap justify-center gap-4 mb-4">
+            <a href="/privacy-policy" className="text-zinc-500 hover:text-accent font-bold text-xs uppercase tracking-widest transition-colors">Privacy Policy</a>
+            <a href="/terms" className="text-zinc-500 hover:text-accent font-bold text-xs uppercase tracking-widest transition-colors">Termini di Servizio</a>
+          </div>
+          <p className="text-zinc-600 text-[10px] uppercase font-black tracking-widest leading-relaxed max-w-2xl mx-auto mb-3">
+            coach-bellu | Titolare: Bellu Riccardo | Via Gradisca 10, Varese, Italia | P.IVA: XXXX | Email: belluriccardo@gmail.com
+          </p>
           <p className="text-zinc-600 text-[10px] uppercase font-black tracking-widest leading-relaxed max-w-2xl mx-auto">
             I contenuti di questo sito sono a solo scopo informativo e non costituiscono un consiglio medico. Consulta un medico prima di iniziare qualsiasi programma di allenamento.
           </p>

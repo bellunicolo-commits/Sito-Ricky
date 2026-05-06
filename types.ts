@@ -39,6 +39,7 @@ export interface PlanItem {
   category: string;
   sets: string;
   reps: string;
+  weight?: string;
   pt_notes: string;
   user_notes?: string;
   recovery?: string;

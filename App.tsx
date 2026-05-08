@@ -79,6 +79,20 @@ const formatExerciseLoad = (item: PlanItem) => {
   return parts.join(' - ');
 };
 
+const PLAN_NOTICE_TEXT = "Le note evidenziate in blu sono inserite dal coach e non possono essere modificate dall'atleta. Per aggiungere nuove note o modificarle, è necessario cliccare sull'icona di modifica situata nell'angolo del riquadro dell'esercizio.";
+
+const clonePlanItemsForEditor = (items: PlanItem[] = []) => items.map(item => ({
+  exercise_name: item.exercise_name,
+  category: item.category,
+  day: item.day || 'Giorno A',
+  sets: item.sets || '',
+  reps: item.reps || '',
+  weight: item.weight || '',
+  recovery: item.recovery || '',
+  notes: item.notes || '',
+  pt_notes: item.pt_notes || ''
+}));
+
 // --- Components ---
 
 const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
@@ -415,27 +429,28 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
   const [loading, setLoading] = useState(false);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
-  const fetchMessages = () => {
-    fetch(`/api/messages/${currentUser.id}?otherId=${otherUser.id}`)
-      .then(res => res.json())
-      .then(data => {
-        setMessages(Array.isArray(data) ? data : []);
-        // Mark as read
-        fetch('/api/messages/read', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ receiverId: currentUser.id, senderId: otherUser.id })
-        }).then(() => {
-          if (onRead) onRead();
-        });
+  const fetchMessages = async () => {
+    try {
+      const res = await fetch(`/api/messages/${currentUser.id}?otherId=${otherUser.id}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setMessages(Array.isArray(data) ? data : []);
+      const readRes = await fetch('/api/messages/read', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receiverId: currentUser.id, senderId: otherUser.id })
       });
+      if (readRes.ok) onRead?.();
+    } catch (err) {
+      console.error("Errore nel caricamento messaggi:", err);
+    }
   };
 
   useEffect(() => {
     fetchMessages();
     const interval = setInterval(fetchMessages, 5000);
     return () => clearInterval(interval);
-  }, [otherUser.id]);
+  }, [currentUser.id, otherUser.id]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -448,11 +463,16 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
     if (!newMessage.trim()) return;
     setLoading(true);
     try {
-      await fetch('/api/messages', {
+      const res = await fetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sender_id: currentUser.id, receiver_id: otherUser.id, content: newMessage }),
+        body: JSON.stringify({ receiver_id: otherUser.id, content: newMessage }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Errore durante l\'invio del messaggio');
+        return;
+      }
       setNewMessage('');
       fetchMessages();
     } finally {
@@ -632,7 +652,10 @@ const Notifications = ({ coachId, onReply, onBack, theme, fullView = false }: { 
                 </div>
               </div>
               <button 
-                onClick={() => onReply(n.sender_id)}
+                onClick={() => {
+                  setNotifications(prev => prev.filter(item => item.sender_id !== n.sender_id));
+                  onReply(n.sender_id);
+                }}
                 className="bg-accent text-black px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white transition-all transition-colors"
                 title="Rispondi"
               >
@@ -656,11 +679,16 @@ const ContactCoach = ({ athleteId, coachId, onBack, theme }: { athleteId: number
     if (!message.trim()) return;
     setLoading(true);
     try {
-      await fetch('/api/messages', {
+      const res = await fetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sender_id: athleteId, receiver_id: coachId, content: message }),
+        body: JSON.stringify({ receiver_id: coachId, content: message }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Errore durante l\'invio del messaggio');
+        return;
+      }
       setSent(true);
       setMessage('');
     } finally {
@@ -675,7 +703,7 @@ const ContactCoach = ({ athleteId, coachId, onBack, theme }: { athleteId: number
           <CheckCircle2 className="w-10 h-10 text-accent" />
         </div>
         <h3 className={`text-3xl font-display font-black italic uppercase tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Messaggio Inviato!</h3>
-        <p className="text-zinc-500 font-bold uppercase tracking-widest text-xs">Pietro ti risponderà il prima possibile.</p>
+        <p className="text-zinc-500 font-bold uppercase tracking-widest text-xs">Il coach ti risponderà il prima possibile.</p>
         <button onClick={onBack} className="btn-primary px-10 py-4">Torna alla Dashboard</button>
       </div>
     );
@@ -1275,8 +1303,9 @@ const ModelsLibrary = ({ models, exercises, onUpdate, theme }: { models: ModelPl
         </button>
       </div>
       <div className="relative">
+        <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-6 h-6 text-zinc-400 pointer-events-none" />
         <input 
-          className={`input-field py-8 text-xl font-bold rounded-[2.5rem] transition-all ${theme === 'light' ? 'bg-white border-zinc-200' : 'bg-zinc-900/50 border-white/5 focus:bg-zinc-900'}`} 
+          className={`input-field pl-16 pr-8 py-8 text-xl font-bold rounded-[2.5rem] transition-all ${theme === 'light' ? 'bg-white border-zinc-200' : 'bg-zinc-900/50 border-white/5 focus:bg-zinc-900'}`} 
           placeholder="Cerca modello per nome, descrizione, keyword..." 
           value={searchTerm} 
           onChange={e => setSearchTerm(e.target.value)} 
@@ -1362,7 +1391,7 @@ const LoadModelView = ({ models, onSelect, onBack, theme }: { models: ModelPlan[
         </div>
       </div>
       <div className="relative">
-        <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-6 h-6 text-zinc-400" />
+        <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-6 h-6 text-zinc-400 pointer-events-none" />
         <input 
           className={`input-field pl-16 py-6 border transition-all ${theme === 'light' ? 'bg-white border-zinc-200 text-zinc-900' : 'bg-black/40 border-white/5 text-white'}`} 
           placeholder="Cerca modello da caricare (nome, descrizione)..." 
@@ -1537,13 +1566,12 @@ const PlanPreview = ({ items, clientName, onBack, theme }: { items: PlanItem[], 
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
-    doc.text("NOTE:", 20, y);
+    doc.text("NOTA BENE:", 20, y);
     y += 10;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text("• 3 giorni x week A-B-C", 25, y); y += 7;
-    doc.text("• La dicitura è serie x ripetizioni", 25, y); y += 7;
-    doc.text("• Tempi di recupero circa 1:30", 25, y);
+    const splitNotice = doc.splitTextToSize(`- ${PLAN_NOTICE_TEXT}`, 170);
+    doc.text(splitNotice, 25, y);
 
     doc.save(`Scheda_${clientName.replace(/\s+/g, '_')}.pdf`);
   };
@@ -1580,12 +1608,12 @@ const PlanPreview = ({ items, clientName, onBack, theme }: { items: PlanItem[], 
               />
             </div>
             <div>
-              <h3 className={`text-2xl font-display font-black italic uppercase tracking-tighter leading-none ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Pietro Cassago</h3>
+              <h3 className={`text-2xl font-display font-black italic uppercase tracking-tighter leading-none ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Il coach</h3>
               <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mt-1">Personal Trainer</p>
             </div>
           </div>
           <div className="text-right text-[10px] font-bold text-zinc-400 uppercase tracking-widest space-y-1">
-            <p>mail: pietrocassagopt@gmail.com</p>
+            <p>mail: belluriccardo@gmail.com</p>
             <p>tel: 3403745135</p>
           </div>
         </div>
@@ -1613,9 +1641,7 @@ const PlanPreview = ({ items, clientName, onBack, theme }: { items: PlanItem[], 
         <div className={`pt-10 border-t ${theme === 'light' ? 'border-zinc-100' : 'border-white/5'}`}>
           <h4 className={`text-xl font-display font-black italic uppercase tracking-tighter mb-6 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>NOTA BENE:</h4>
           <ul className="space-y-3 text-sm font-medium text-zinc-500">
-            <li className="flex gap-3"><span className="text-blue-600">•</span> 3 giorni x week A-B-C</li>
-            <li className="flex gap-3"><span className="text-blue-600">•</span> La dicitura è serie x ripetizioni</li>
-            <li className="flex gap-3"><span className="text-blue-600">•</span> Se non indicato diversamente i tempi di recupero sono circa 1:30</li>
+            <li className="flex gap-3"><span className="text-blue-600">•</span> {PLAN_NOTICE_TEXT}</li>
           </ul>
         </div>
       </div>
@@ -2009,7 +2035,8 @@ const PTHome = ({ user, theme, clients, onAthleteClick, onNotificationsClick }: 
     })
     .sort((a, b) => (getDaysRemaining(a.contract_end) ?? 999) - (getDaysRemaining(b.contract_end) ?? 999));
 
-  const recentAthletes = [...safeClients]
+  const recentAthletes = safeClients
+    .filter(c => !isContractExpired(c.contract_end))
     .sort((a, b) => {
       // Use created_at if available or ID
       const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -2058,25 +2085,47 @@ const PTHome = ({ user, theme, clients, onAthleteClick, onNotificationsClick }: 
             <h3 className="text-xs font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center gap-3">
               <AlertCircle className="w-4 h-4 text-red-500" /> Contratti Scaduti / in Scadenza
             </h3>
-            {expiringAthletes.length > 0 ? expiringAthletes.map(athlete => {
-              const daysLeft = getDaysRemaining(athlete.contract_end);
-              const label = daysLeft === null
-                ? ''
-                : daysLeft < 0
-                  ? `Scaduto da ${Math.abs(daysLeft)} giorni`
-                  : daysLeft === 0
-                    ? 'Scade oggi'
-                    : `Scade in ${daysLeft} giorni`;
-              return (
-                <div key={athlete.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0 grow">
-                  <div className="flex items-center gap-3">
-                    <Clock className={`w-4 h-4 ${theme === 'dark' ? 'text-accent' : 'text-zinc-900'}`} />
-                    <p className={`font-black uppercase tracking-widest text-[10px] ${theme === 'dark' ? 'text-white' : 'text-zinc-900'}`}>{athlete.name}</p>
-                  </div>
-                  <p className="text-red-500 text-[10px] font-black uppercase tracking-widest">{label}</p>
-                </div>
-              );
-            }) : (
+            {expiringAthletes.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {expiringAthletes.map(athlete => {
+                  const daysLeft = getDaysRemaining(athlete.contract_end);
+                  const label = daysLeft === null
+                    ? ''
+                    : daysLeft < 0
+                      ? `Scaduto da ${Math.abs(daysLeft)} giorni`
+                      : daysLeft === 0
+                        ? 'Scade oggi'
+                        : `Scade in ${daysLeft} giorni`;
+                  const contractEnd = athlete.contract_end ? new Date(athlete.contract_end).toLocaleDateString() : 'N/D';
+                  return (
+                    <button
+                      key={athlete.id}
+                      onClick={() => onAthleteClick(athlete)}
+                      className={`w-full text-left glass p-6 rounded-[2.5rem] flex items-center justify-between group hover:shadow-2xl transition-all border ${
+                        theme === 'light'
+                          ? 'bg-red-50 border-red-200 hover:shadow-red-100'
+                          : 'bg-red-950/20 border-red-500/20 hover:border-red-500/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-6">
+                        <div className={`w-14 h-14 rounded-[1.5rem] flex items-center justify-center font-black text-2xl italic shrink-0 ${
+                          theme === 'dark' ? 'bg-red-500/10 text-red-400' : 'bg-red-100 text-red-600'
+                        }`}>
+                          {athlete.name.charAt(0)}
+                        </div>
+                        <div className="flex flex-col">
+                          <h4 className={`text-xl font-display font-black italic uppercase tracking-tighter leading-none transition-colors ${
+                            theme === 'light' ? 'text-red-950 group-hover:text-red-600' : 'text-white group-hover:text-red-300'
+                          }`}>{athlete.name}</h4>
+                          <span className="text-[10px] font-black text-red-500 uppercase tracking-widest mt-2">Fine contratto {contractEnd}</span>
+                        </div>
+                      </div>
+                      <p className="text-red-500 text-[10px] font-black uppercase tracking-widest text-right">{label}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
                 <p className="text-zinc-500 font-bold uppercase tracking-widest text-[8px] italic">Nessun contratto in scadenza.</p>
               )}
           </section>
@@ -2115,6 +2164,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
   const [athleteActionMenu, setAthleteActionMenu] = useState<User | null>(null);
   const infoRef = React.useRef<HTMLDivElement>(null);
   const exerciseSearchRef = React.useRef<HTMLInputElement>(null);
+  const exercisePickerRef = React.useRef<HTMLDivElement>(null);
   const [lastScrollPos, setLastScrollPos] = useState(() => {
     const saved = sessionStorage.getItem('pt_athlete_list_scroll');
     return saved ? parseInt(saved) : 0;
@@ -2210,6 +2260,22 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
     return () => clearInterval(interval);
   }, [pt.id]);
 
+  useEffect(() => {
+    if (!searchTerm && !exercisePickerDay) return;
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (!exercisePickerRef.current?.contains(event.target as Node)) {
+        setSearchTerm('');
+        setExercisePickerDay(null);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [searchTerm, exercisePickerDay]);
+
   const handleUpdateAthlete = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAthlete) return;
@@ -2293,6 +2359,28 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
     setNewPlanItems(newPlanItems.filter((_, i) => i !== index));
   };
 
+  const startNewPlan = async () => {
+    if (!selectedClient) return;
+    setLoading(true);
+    setSearchTerm('');
+    setExercisePickerDay(null);
+    setExpandedDays(['Giorno A']);
+    try {
+      let nextItems: PlanItem[] = [];
+      const res = await fetch(`/api/plans/${selectedClient.id}`);
+      if (res.ok) {
+        const existingPlan = await res.json();
+        if (existingPlan?.items?.length && confirm('Vuoi caricare la nuova scheda in questa?')) {
+          nextItems = clonePlanItemsForEditor(existingPlan.items);
+        }
+      }
+      setNewPlanItems(nextItems);
+      setView('editor');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const savePlan = async () => {
     if (!selectedClient) return;
     setLoading(true);
@@ -2355,17 +2443,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
         userId={selectedClient.id} 
         clientName={selectedClient.name} 
         onLoadPlan={(items) => {
-          setNewPlanItems(items.map(item => ({
-            exercise_name: item.exercise_name,
-            category: item.category,
-            day: item.day,
-            sets: item.sets,
-            reps: item.reps,
-            weight: item.weight || '',
-            recovery: item.recovery || '',
-            notes: item.notes || '',
-            pt_notes: item.pt_notes || ''
-          })));
+          setNewPlanItems(clonePlanItemsForEditor(items));
           setView('editor');
         }}
         onBack={handleBackFromInfo} 
@@ -2380,17 +2458,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
         models={models}
         onSelect={(items) => {
           // Add loaded items to current plan items
-          const cleanedItems = items.map(item => ({
-            exercise_name: item.exercise_name,
-            category: item.category,
-            day: item.day,
-            sets: item.sets,
-            reps: item.reps,
-            weight: item.weight || '',
-            recovery: item.recovery || '',
-            notes: item.notes || '',
-            pt_notes: item.pt_notes || ''
-          }));
+          const cleanedItems = clonePlanItemsForEditor(items);
           setNewPlanItems([...newPlanItems, ...cleanedItems]);
           setView('editor');
         }}
@@ -2775,7 +2843,8 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                 </div>
                 <div className="flex gap-3 mt-4 sm:mt-0 order-last sm:order-none">
                   <button 
-                    onClick={() => setView('editor')}
+                    onClick={startNewPlan}
+                    disabled={loading}
                     className="btn-primary flex items-center gap-2 py-3 px-6 sm:py-4 sm:px-8 text-[10px] sm:text-xs"
                   >
                     <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> Crea Scheda
@@ -2928,7 +2997,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
             </div>
 
             {/* Quick Search */}
-            <div className="relative">
+            <div className="relative" ref={exercisePickerRef}>
               <input
                 ref={exerciseSearchRef}
                 type="text"
@@ -3034,7 +3103,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
                           <div className="md:col-span-1">
                             <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2 block ml-1">Giorno</label>
                             <select 
-                              className="input-field py-4 rounded-2xl font-black text-accent"
+                              className="input-field py-4 pl-3 pr-8 rounded-2xl font-black text-accent text-left"
                               value={item.day}
                               onChange={(e) => {
                                 const updated = [...newPlanItems];
@@ -3387,7 +3456,7 @@ const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 
   const contractExpired = isContractExpired(user.contract_end);
 
   const downloadPDF = () => {
-    if (!plan) return;
+    if (!plan || contractExpired) return;
     const doc = new jsPDF();
     doc.setFont("helvetica", "bold");
     doc.setFontSize(22);
@@ -3430,7 +3499,7 @@ const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 
   }
 
   if (view === 'notifications') {
-    return <Notifications coachId={user.id} onBack={() => setView('dashboard')} onReply={() => setView('chat')} theme={theme} />;
+    return <Notifications coachId={user.id} onBack={() => setView('dashboard')} onReply={() => { setUnreadCount(0); setView('chat'); }} theme={theme} />;
   }
 
   if (view === 'contact') {
@@ -3440,7 +3509,7 @@ const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 
 
   if (view === 'chat') {
     if (!coach) return <div className="text-center py-20 text-zinc-500 font-bold uppercase tracking-widest text-xs">Caricamento dati coach...</div>;
-    return <Chat currentUser={user} otherUser={coach} onBack={() => setView('dashboard')} theme={theme} />;
+    return <Chat currentUser={user} otherUser={coach} onBack={() => setView('dashboard')} theme={theme} onRead={() => setUnreadCount(0)} />;
   }
 
   if (loading) return (
@@ -3489,9 +3558,24 @@ const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 
           </div>
           <h3 className={`text-4xl font-display font-black italic uppercase tracking-tighter mb-6 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Nessun Piano Attivo</h3>
           <p className="text-zinc-500 font-bold max-w-md mx-auto mb-10 text-lg">
-            Pietro sta ancora preparando il tuo percorso. Riceverai una notifica non appena la tua scheda sarà pronta.
+            Il coach sta ancora preparando il tuo percorso. Riceverai una notifica non appena la tua scheda sarà pronta.
           </p>
           <button onClick={() => window.location.reload()} className="btn-primary px-12 py-5">Controlla Aggiornamenti</button>
+        </div>
+      ) : contractExpired ? (
+        <div className={`p-10 sm:p-16 rounded-[4rem] text-center border shadow-2xl ${theme === 'light' ? 'bg-white border-red-100' : 'bg-zinc-900 border-red-500/20'}`}>
+          <div className="w-24 h-24 bg-red-500/10 rounded-[2rem] flex items-center justify-center mx-auto mb-8 border border-red-500/20">
+            <AlertCircle className="w-12 h-12 text-red-500" />
+          </div>
+          <h3 className={`text-4xl font-display font-black italic uppercase tracking-tighter mb-6 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Programma Scaduto</h3>
+          <p className="text-zinc-500 font-bold max-w-xl mx-auto mb-10 text-lg">
+            Il programma è scaduto. Parla con il coach per rinnovarlo.
+          </p>
+          {coach && (
+            <button onClick={() => setView('chat')} className="btn-primary px-12 py-5">
+              Scrivi al Coach
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-20 overflow-x-hidden overflow-y-visible w-full">
@@ -3568,7 +3652,7 @@ const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 
             <ul className="space-y-6 text-zinc-500 font-bold text-lg">
               <li className="flex gap-4">
                 <span className="text-accent font-black">•</span>
-                <span>Le note evidenziate in blu sono inserite dal coach e non possono essere modificate dall'atleta. Per aggiungere nuove note o modificarle, è necessario cliccare sull'icona di modifica situata nell'angolo del riquadro dell'esercizio.</span>
+                <span>{PLAN_NOTICE_TEXT}</span>
               </li>
             </ul>
           </div>
@@ -4097,7 +4181,7 @@ export default function App() {
         const freshUser = await res.json();
         if (cancelled) return;
         setUser(prev => {
-          if (!prev || prev.id !== freshUser.id) return prev;
+          if (!prev) return prev;
           const next = { ...prev, ...freshUser };
           localStorage.setItem('fitplan_user', JSON.stringify(next));
           return next;
@@ -4431,7 +4515,18 @@ export default function App() {
             >
               <div className="max-w-4xl mx-auto mt-10">
                 {coach ? (
-                  <Chat currentUser={user} otherUser={coach} onBack={() => setActiveTab('dashboard')} theme={theme} newMessagesCount={chatDividerCount} />
+                  <Chat
+                    currentUser={user}
+                    otherUser={coach}
+                    onBack={() => setActiveTab('dashboard')}
+                    theme={theme}
+                    newMessagesCount={chatDividerCount}
+                    onRead={() => {
+                      const countForCoach = unreadNotifications.filter(n => n.sender_id === coach.id).length;
+                      setUnreadNotifications(prev => prev.filter(n => n.sender_id !== coach.id));
+                      setUnreadCount(prev => Math.max(0, prev - countForCoach));
+                    }}
+                  />
                 ) : (
                   <div className="text-center py-20 text-zinc-500 font-bold uppercase tracking-widest text-xs">Caricamento dati coach...</div>
                 )}
@@ -4466,13 +4561,13 @@ export default function App() {
                   />
                 ) : (
                   <Notifications coachId={user.id} onBack={() => setActiveTab('dashboard')} onReply={(senderId) => {
-                    const client = clients.find(c => c.id === senderId);
-                    if (client) {
-                      setSelectedClient(client);
-                      setPtTargetView('chat');
-                      setActiveTab('dashboard');
-                    }
-                  }} theme={theme} fullView={true} />
+                    const countForSender = unreadNotifications.filter(n => n.sender_id === senderId).length;
+                    setChatDividerCount(countForSender);
+                    setUnreadNotifications(prev => prev.filter(n => n.sender_id !== senderId));
+                    setUnreadCount(prev => Math.max(0, prev - countForSender));
+                    setActiveTab('chat');
+                    setIsHeaderMenuOpen(false);
+                  }} theme={theme} />
                 )}
               </div>
             </motion.div>

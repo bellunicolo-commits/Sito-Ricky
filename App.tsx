@@ -79,6 +79,8 @@ const formatExerciseLoad = (item: PlanItem) => {
   return parts.join(' - ');
 };
 
+const PLAN_NOTICE_TEXT = "Le note evidenziate in blu sono inserite dal coach e non possono essere modificate dall'atleta. Per aggiungere nuove note o modificarle, è necessario cliccare sull'icona di modifica situata nell'angolo del riquadro dell'esercizio.";
+
 const clonePlanItemsForEditor = (items: PlanItem[] = []) => items.map(item => ({
   exercise_name: item.exercise_name,
   category: item.category,
@@ -464,7 +466,7 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
       const res = await fetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sender_id: currentUser.id, receiver_id: otherUser.id, content: newMessage }),
+        body: JSON.stringify({ receiver_id: otherUser.id, content: newMessage }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -680,7 +682,7 @@ const ContactCoach = ({ athleteId, coachId, onBack, theme }: { athleteId: number
       const res = await fetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sender_id: athleteId, receiver_id: coachId, content: message }),
+        body: JSON.stringify({ receiver_id: coachId, content: message }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -1564,13 +1566,12 @@ const PlanPreview = ({ items, clientName, onBack, theme }: { items: PlanItem[], 
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
-    doc.text("NOTE:", 20, y);
+    doc.text("NOTA BENE:", 20, y);
     y += 10;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text("• 3 giorni x week A-B-C", 25, y); y += 7;
-    doc.text("• La dicitura è serie x ripetizioni", 25, y); y += 7;
-    doc.text("• Tempi di recupero circa 1:30", 25, y);
+    const splitNotice = doc.splitTextToSize(`- ${PLAN_NOTICE_TEXT}`, 170);
+    doc.text(splitNotice, 25, y);
 
     doc.save(`Scheda_${clientName.replace(/\s+/g, '_')}.pdf`);
   };
@@ -1640,9 +1641,7 @@ const PlanPreview = ({ items, clientName, onBack, theme }: { items: PlanItem[], 
         <div className={`pt-10 border-t ${theme === 'light' ? 'border-zinc-100' : 'border-white/5'}`}>
           <h4 className={`text-xl font-display font-black italic uppercase tracking-tighter mb-6 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>NOTA BENE:</h4>
           <ul className="space-y-3 text-sm font-medium text-zinc-500">
-            <li className="flex gap-3"><span className="text-blue-600">•</span> 3 giorni x week A-B-C</li>
-            <li className="flex gap-3"><span className="text-blue-600">•</span> La dicitura è serie x ripetizioni</li>
-            <li className="flex gap-3"><span className="text-blue-600">•</span> Se non indicato diversamente i tempi di recupero sono circa 1:30</li>
+            <li className="flex gap-3"><span className="text-blue-600">•</span> {PLAN_NOTICE_TEXT}</li>
           </ul>
         </div>
       </div>
@@ -3457,7 +3456,7 @@ const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 
   const contractExpired = isContractExpired(user.contract_end);
 
   const downloadPDF = () => {
-    if (!plan) return;
+    if (!plan || contractExpired) return;
     const doc = new jsPDF();
     doc.setFont("helvetica", "bold");
     doc.setFontSize(22);
@@ -3563,6 +3562,21 @@ const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 
           </p>
           <button onClick={() => window.location.reload()} className="btn-primary px-12 py-5">Controlla Aggiornamenti</button>
         </div>
+      ) : contractExpired ? (
+        <div className={`p-10 sm:p-16 rounded-[4rem] text-center border shadow-2xl ${theme === 'light' ? 'bg-white border-red-100' : 'bg-zinc-900 border-red-500/20'}`}>
+          <div className="w-24 h-24 bg-red-500/10 rounded-[2rem] flex items-center justify-center mx-auto mb-8 border border-red-500/20">
+            <AlertCircle className="w-12 h-12 text-red-500" />
+          </div>
+          <h3 className={`text-4xl font-display font-black italic uppercase tracking-tighter mb-6 ${theme === 'light' ? 'text-zinc-900' : 'text-white'}`}>Programma Scaduto</h3>
+          <p className="text-zinc-500 font-bold max-w-xl mx-auto mb-10 text-lg">
+            Il programma è scaduto. Parla con il coach per rinnovarlo.
+          </p>
+          {coach && (
+            <button onClick={() => setView('chat')} className="btn-primary px-12 py-5">
+              Scrivi al Coach
+            </button>
+          )}
+        </div>
       ) : (
         <div className="space-y-20 overflow-x-hidden overflow-y-visible w-full">
           {(Object.entries(groupedItems) as [string, PlanItem[]][]).sort().map(([day, items]) => {
@@ -3638,7 +3652,7 @@ const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 
             <ul className="space-y-6 text-zinc-500 font-bold text-lg">
               <li className="flex gap-4">
                 <span className="text-accent font-black">•</span>
-                <span>Le note evidenziate in blu sono inserite dal coach e non possono essere modificate dall'atleta. Per aggiungere nuove note o modificarle, è necessario cliccare sull'icona di modifica situata nell'angolo del riquadro dell'esercizio.</span>
+                <span>{PLAN_NOTICE_TEXT}</span>
               </li>
             </ul>
           </div>
@@ -4167,7 +4181,7 @@ export default function App() {
         const freshUser = await res.json();
         if (cancelled) return;
         setUser(prev => {
-          if (!prev || prev.id !== freshUser.id) return prev;
+          if (!prev) return prev;
           const next = { ...prev, ...freshUser };
           localStorage.setItem('fitplan_user', JSON.stringify(next));
           return next;

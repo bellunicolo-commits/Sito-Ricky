@@ -123,7 +123,7 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
       return;
     }
     if (!isLogin && !isForgot && !ageConfirmed) {
-      setError('Devi avere almeno 14 anni per usare questo servizio.');
+      setError('Devi avere almeno 14 anni e, se minorenne, avere l\'autorizzazione di un genitore o tutore.');
       return;
     }
     if (!isLogin && !isForgot && !hasStrongPassword(password)) {
@@ -292,7 +292,7 @@ const Auth = ({ onLogin }: { onLogin: (user: User) => void }) => {
                   required
                 />
                 <label htmlFor="age-confirmed" className="text-[10px] text-zinc-500 uppercase tracking-widest leading-relaxed">
-                  Dichiaro di avere almeno 14 anni.
+                  Dichiaro di avere almeno 14 anni e, se minorenne, di usare il servizio con autorizzazione di un genitore o tutore.
                 </label>
               </div>
             </div>
@@ -3356,16 +3356,25 @@ const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 
   const [unreadCount, setUnreadCount] = useState(0);
   const [expandedDays, setExpandedDays] = useState<string[]>(['Giorno A']);
 
+  const fetchUnread = React.useCallback(async () => {
+    try {
+      const res = await fetch(`/api/notifications/${user.id}`);
+      if (!res.ok) {
+        setUnreadCount(0);
+        return;
+      }
+      const data = await res.json();
+      setUnreadCount(Array.isArray(data) ? data.length : 0);
+    } catch {
+      setUnreadCount(0);
+    }
+  }, [user.id]);
+
   useEffect(() => {
-    const fetchUnread = () => {
-      fetch(`/api/notifications/${user.id}`)
-        .then(res => res.json())
-        .then(data => setUnreadCount(Array.isArray(data) ? data.length : 0));
-    };
     fetchUnread();
     const interval = setInterval(fetchUnread, 5000);
     return () => clearInterval(interval);
-  }, [user.id]);
+  }, [fetchUnread]);
 
   useEffect(() => {
     fetch(`/api/plans/${user.id}`)
@@ -3509,7 +3518,7 @@ const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 
 
   if (view === 'chat') {
     if (!coach) return <div className="text-center py-20 text-zinc-500 font-bold uppercase tracking-widest text-xs">Caricamento dati coach...</div>;
-    return <Chat currentUser={user} otherUser={coach} onBack={() => setView('dashboard')} theme={theme} onRead={() => setUnreadCount(0)} />;
+    return <Chat currentUser={user} otherUser={coach} onBack={() => setView('dashboard')} theme={theme} onRead={fetchUnread} />;
   }
 
   if (loading) return (
@@ -3952,7 +3961,9 @@ const LegalPrivacyPolicy = ({ settings, theme }: any) => {
               <p><strong>Dati raccolti:</strong> nome, cognome, email, password salvata solo in forma hash, peso, altezza e condizioni di salute inseriti dal coach/admin dopo il consulto. Possono inoltre essere trattati log tecnici essenziali come IP, timestamp, endpoint, user-agent e status code.</p>
               <p><strong>Finalita del trattamento:</strong> gestione account, accesso al programma personale, creazione e gestione di programmi di allenamento personalizzati, sicurezza del servizio, prevenzione abusi e reset password tramite email.</p>
               <p><strong>Base giuridica:</strong> consenso dell'utente ai sensi dell'art. 6 GDPR, consenso esplicito ai sensi dell'art. 9 GDPR per i dati relativi alla salute e legittimo interesse per sicurezza tecnica, prevenzione abusi e log tecnici essenziali.</p>
-              <p><strong>Minori:</strong> il servizio non e destinato a utenti sotto i 14 anni. Gli utenti sotto i 14 anni non possono registrarsi o usare il servizio. In Italia, per i servizi online, i minori di almeno 14 anni possono prestare il consenso al trattamento dei dati personali. Se il Titolare viene a conoscenza della raccolta di dati di un utente sotto i 14 anni, l'account e i dati collegati saranno eliminati.</p>
+              <p><strong>Cookie tecnici:</strong> il sito utilizza esclusivamente cookie tecnici/sessione necessari per autenticazione, sicurezza e funzionamento del servizio. Non sono usati cookie di profilazione, marketing o analytics.</p>
+              <p><strong>Profilazione e decisioni automatizzate:</strong> non vengono effettuati processi decisionali automatizzati, profilazione, marketing tracking o analytics.</p>
+              <p><strong>Minori:</strong> il servizio non e destinato a utenti sotto i 14 anni. Gli utenti sotto i 14 anni non possono registrarsi o usare il servizio. In Italia, per i servizi online, i minori di almeno 14 anni possono prestare il consenso al trattamento dei dati personali. Per utenti tra 14 e 17 anni, il Titolare puo richiedere conferma o autorizzazione di un genitore/tutore per il rapporto di coaching e per eventuali aspetti contrattuali gestiti fuori dal sito. Se il Titolare viene a conoscenza della raccolta di dati di un utente sotto i 14 anni, l'account e i dati collegati saranno eliminati.</p>
               <p><strong>Fornitori:</strong> hosting su Render, database su Turso, email e reset password tramite Brevo. Se i fornitori trattano dati fuori dallo Spazio Economico Europeo, devono applicarsi garanzie adeguate, incluse le Clausole Contrattuali Standard ove richiesto.</p>
               <p><strong>Conservazione:</strong> i dati account e relativi alla salute sono conservati per la durata del rapporto di coaching. In caso di richiesta o eliminazione account, i dati sono cancellati immediatamente salvo obblighi legali o tecnici. I log tecnici sono conservati per massimo 30 giorni e non devono includere password, token, dati salute o payload sensibili.</p>
               <p><strong>Diritti dell'utente:</strong> accesso, rettifica, cancellazione, opposizione, limitazione, portabilita e revoca del consenso. Per esercitare i diritti scrivi a <a href={`mailto:${ownerEmail}`} className="text-accent hover:underline">{ownerEmail}</a>.</p>
@@ -3967,7 +3978,9 @@ const LegalPrivacyPolicy = ({ settings, theme }: any) => {
               <p><strong>Data collected:</strong> first name, last name, email, password stored only as a hash, weight, height and health conditions entered by the coach/admin after consultation. Essential technical logs may also be processed, such as IP address, timestamp, endpoint, user-agent and status code.</p>
               <p><strong>Purposes:</strong> account management, access to the personal program, creation and management of personalized training programs, service security, abuse prevention and password reset by email.</p>
               <p><strong>Legal basis:</strong> user consent under Article 6 GDPR, explicit consent under Article 9 GDPR for health-related data, and legitimate interest for technical security, abuse prevention and essential technical logs.</p>
-              <p><strong>Minors:</strong> the service is not intended for users under 14 years old. Users under 14 may not register or use the service. In Italy, for online services, minors aged 14 or older may give consent to personal data processing. If the Data Controller becomes aware that data from a user under 14 has been collected, the account and related data will be deleted.</p>
+              <p><strong>Technical cookies:</strong> the website uses only technical/session cookies necessary for authentication, security and service operation. No profiling, marketing or analytics cookies are used.</p>
+              <p><strong>Profiling and automated decisions:</strong> no automated decision-making, profiling, marketing tracking or analytics are carried out.</p>
+              <p><strong>Minors:</strong> the service is not intended for users under 14 years old. Users under 14 may not register or use the service. In Italy, for online services, minors aged 14 or older may give consent to personal data processing. For users aged 14 to 17, the Data Controller may request confirmation or authorization from a parent/legal guardian for the coaching relationship and for any contractual aspects handled outside the website. If the Data Controller becomes aware that data from a user under 14 has been collected, the account and related data will be deleted.</p>
               <p><strong>Providers:</strong> hosting by Render, database by Turso, email and password reset by Brevo. If providers process data outside the EEA, appropriate safeguards, including Standard Contractual Clauses where required, should apply.</p>
               <p><strong>Retention:</strong> account and health-related data are stored for the duration of the coaching relationship. If the user requests account deletion, data are deleted immediately unless legal or technical obligations require otherwise. Technical logs are retained for a maximum of 30 days and must not include passwords, tokens, health data or sensitive payloads.</p>
               <p><strong>User rights:</strong> access, correction, deletion, objection, restriction, portability and withdrawal of consent. To exercise these rights, contact <a href={`mailto:${ownerEmail}`} className="text-accent hover:underline">{ownerEmail}</a>.</p>
@@ -4002,7 +4015,7 @@ const TermsPage = ({ theme }: any) => {
           {lang === 'it' ? (
             <>
               <p><strong>Servizio:</strong> coach-bellu consente agli atleti di accedere al proprio programma fitness/coaching personalizzato. I pagamenti non sono gestiti sul sito.</p>
-              <p><strong>Requisito di eta:</strong> per registrarsi o usare il servizio devi avere almeno 14 anni.</p>
+              <p><strong>Requisito di eta:</strong> per registrarsi o usare il servizio devi avere almeno 14 anni. Se hai tra 14 e 17 anni, devi usare il servizio con autorizzazione di un genitore o tutore, soprattutto per il rapporto di coaching e per eventuali accordi o pagamenti gestiti fuori dal sito.</p>
               <p><strong>Responsabilita dell'utente:</strong> l'utente deve fornire informazioni corrette e mantenere riservate le credenziali del proprio account.</p>
               <p><strong>Nessuna garanzia di risultato:</strong> i programmi di allenamento possono supportare il percorso dell'utente, ma non garantiscono risultati specifici.</p>
               <p><strong>Salute e allenamento:</strong> l'utente segue i programmi sotto la propria responsabilita. Il servizio non sostituisce consulenza medica; in presenza di patologie, dubbi o condizioni fisiche particolari, e necessario consultare un medico prima di allenarsi.</p>
@@ -4014,7 +4027,7 @@ const TermsPage = ({ theme }: any) => {
           ) : (
             <>
               <p><strong>Service:</strong> coach-bellu allows athletes to access their personalized fitness/coaching program. Payments are not processed on the website.</p>
-              <p><strong>Age requirement:</strong> users must be at least 14 years old to register or use the service.</p>
+              <p><strong>Age requirement:</strong> users must be at least 14 years old to register or use the service. Users aged 14 to 17 must use the service with authorization from a parent or legal guardian, especially for the coaching relationship and for any agreements or payments handled outside the website.</p>
               <p><strong>User responsibility:</strong> users must provide accurate information and keep account credentials confidential.</p>
               <p><strong>No guaranteed results:</strong> training programs may support the user's progress but do not guarantee specific results.</p>
               <p><strong>Health and training:</strong> users follow training programs at their own responsibility. The service does not replace medical advice; users with medical conditions, doubts or specific physical conditions must consult a doctor before training.</p>
@@ -4150,12 +4163,19 @@ export default function App() {
       if (Array.isArray(data)) {
         setUnreadCount(data.length);
         setUnreadNotifications(data);
+        if (data.length === 0) {
+          setChatDividerCount(0);
+        }
       } else {
         setUnreadCount(0);
         setUnreadNotifications([]);
+        setChatDividerCount(0);
       }
     } catch (err) {
       console.error("Error fetching unread:", err);
+      setUnreadCount(0);
+      setUnreadNotifications([]);
+      setChatDividerCount(0);
     }
   };
 
@@ -4242,6 +4262,14 @@ export default function App() {
 
   const handleLogin = (u: User) => {
     setUser(u);
+    setSelectedClient(null);
+    setPtTargetView(null);
+    setCoach(null);
+    setUnreadCount(0);
+    setUnreadNotifications([]);
+    setChatDividerCount(0);
+    setIsHeaderMenuOpen(false);
+    setActiveTab(u.role === 'pt' ? 'home' : 'dashboard');
     localStorage.setItem('fitplan_user', JSON.stringify(u));
   };
 
@@ -4472,11 +4500,8 @@ export default function App() {
                   onViewHandled={() => setPtTargetView(null)}
                   newMessagesCount={chatDividerCount}
                   onRead={() => {
-                    if (selectedClient) {
-                      const countForClient = unreadNotifications.filter(n => n.sender_id === selectedClient.id).length;
-                      setUnreadNotifications(prev => prev.filter(n => n.sender_id !== selectedClient.id));
-                      setUnreadCount(prev => Math.max(0, prev - countForClient));
-                    }
+                    setChatDividerCount(0);
+                    fetchUnread();
                   }}
                 />
               ) : (
@@ -4522,9 +4547,8 @@ export default function App() {
                     theme={theme}
                     newMessagesCount={chatDividerCount}
                     onRead={() => {
-                      const countForCoach = unreadNotifications.filter(n => n.sender_id === coach.id).length;
-                      setUnreadNotifications(prev => prev.filter(n => n.sender_id !== coach.id));
-                      setUnreadCount(prev => Math.max(0, prev - countForCoach));
+                      setChatDividerCount(0);
+                      fetchUnread();
                     }}
                   />
                 ) : (

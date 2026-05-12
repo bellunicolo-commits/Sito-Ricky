@@ -427,12 +427,18 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [chatError, setChatError] = useState('');
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
   const fetchMessages = async () => {
     try {
       const res = await fetch(`/api/messages/${currentUser.id}?otherId=${otherUser.id}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setChatError(data.error || 'Impossibile caricare i messaggi.');
+        return;
+      }
+      setChatError('');
       const data = await res.json();
       setMessages(Array.isArray(data) ? data : []);
       const readRes = await fetch('/api/messages/read', {
@@ -443,6 +449,7 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
       if (readRes.ok) onRead?.();
     } catch (err) {
       console.error("Errore nel caricamento messaggi:", err);
+      setChatError('Impossibile caricare i messaggi. Controlla la connessione e riprova.');
     }
   };
 
@@ -473,8 +480,16 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
         alert(data.error || 'Errore durante l\'invio del messaggio');
         return;
       }
+      const sentMessage = await res.json().catch(() => null);
+      if (sentMessage) {
+        setMessages(prev => [...prev, sentMessage]);
+      }
+      setChatError('');
       setNewMessage('');
       fetchMessages();
+    } catch (err) {
+      console.error("Errore durante l'invio del messaggio:", err);
+      alert('Errore durante l\'invio del messaggio');
     } finally {
       setLoading(false);
     }
@@ -495,6 +510,11 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
       </div>
       
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-hide">
+        {chatError && (
+          <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-black uppercase tracking-widest">
+            {chatError}
+          </div>
+        )}
         {messages.map((m, i) => (
           <React.Fragment key={i}>
             {newMessagesCount > 0 && i === messages.length - newMessagesCount && (
@@ -538,7 +558,7 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
 
 const CoachInbox = ({ unreadNotifications, onSelectAthlete, onBack, theme }: { 
   unreadNotifications: any[], 
-  onSelectAthlete: (senderId: number) => void,
+  onSelectAthlete: (senderId: number, senderName?: string) => void,
   onBack: () => void,
   theme?: 'dark' | 'light' 
 }) => {
@@ -585,7 +605,7 @@ const CoachInbox = ({ unreadNotifications, onSelectAthlete, onBack, theme }: {
           items.map((item: any) => (
             <button 
               key={item.sender_id}
-              onClick={() => onSelectAthlete(item.sender_id)}
+              onClick={() => onSelectAthlete(item.sender_id, item.sender_name)}
               className="glass p-6 rounded-[2.5rem] flex items-center justify-between group hover:scale-[1.01] transition-all text-left"
             >
               <div className="flex items-center gap-6">
@@ -2251,7 +2271,8 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
   const fetchUnread = () => {
     fetch(`/api/notifications/${pt.id}`)
       .then(res => res.json())
-      .then(data => setUnreadCount(Array.isArray(data) ? data.length : 0));
+      .then(data => setUnreadCount(Array.isArray(data) ? data.length : 0))
+      .catch(() => setUnreadCount(0));
   };
 
   useEffect(() => {
@@ -4568,8 +4589,13 @@ export default function App() {
                   <CoachInbox 
                     unreadNotifications={unreadNotifications} 
                     onBack={() => setActiveTab('dashboard')} 
-                    onSelectAthlete={(senderId) => {
-                      const client = clients.find(c => c.id === senderId);
+                    onSelectAthlete={(senderId, senderName) => {
+                      const client = clients.find(c => c.id === senderId) || {
+                        id: senderId,
+                        name: senderName || 'Atleta',
+                        email: '',
+                        role: 'user' as Role
+                      };
                       if (client) {
                         const countForClient = unreadNotifications.filter(n => n.sender_id === senderId).length;
                         setChatDividerCount(countForClient);

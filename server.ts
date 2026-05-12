@@ -471,7 +471,8 @@ async function startServer() {
       const targetEmail = receiver.notification_email || receiver.email;
       await sendMail(targetEmail, "Nuova Notifica - Coach Bellu", `Hai ricevuto un nuovo messaggio da ${sender.name}: "${safeContent}"`);
     }
-    res.json({ id: result.lastInsertRowid, sender_id: senderId, receiver_id: receiverId, content: safeContent });
+    const inserted = await db.execute({ sql: "SELECT * FROM messages WHERE id = ?", args: [result.lastInsertRowid] });
+    res.json(inserted.rows[0] || { id: result.lastInsertRowid, sender_id: senderId, receiver_id: receiverId, content: safeContent, is_read: 0, created_at: new Date().toISOString() });
   });
 
   app.get("/api/messages/:userId", async (req: any, res) => {

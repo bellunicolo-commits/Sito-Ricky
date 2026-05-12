@@ -81,6 +81,14 @@ const formatExerciseLoad = (item: PlanItem) => {
 
 const PLAN_NOTICE_TEXT = "Le note evidenziate in blu sono inserite dal coach e non possono essere modificate dall'atleta. Per aggiungere nuove note o modificarle, è necessario cliccare sull'icona di modifica situata nell'angolo del riquadro dell'esercizio.";
 
+const countUnreadThreads = (notifications: any[] = []) => {
+  return new Set(
+    notifications
+      .map(notification => Number(notification.sender_id))
+      .filter(Boolean)
+  ).size;
+};
+
 const clonePlanItemsForEditor = (items: PlanItem[] = []) => items.map(item => ({
   exercise_name: item.exercise_name,
   category: item.category,
@@ -429,6 +437,8 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
   const [loading, setLoading] = useState(false);
   const [chatError, setChatError] = useState('');
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  const unreadMessageCount = Math.min(newMessagesCount, messages.length);
+  const unreadDividerIndex = unreadMessageCount > 0 ? messages.length - unreadMessageCount : -1;
 
   const fetchMessages = async () => {
     try {
@@ -486,7 +496,8 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
       }
       setChatError('');
       setNewMessage('');
-      fetchMessages();
+      await fetchMessages();
+      onRead?.();
     } catch (err) {
       console.error("Errore durante l'invio del messaggio:", err);
       alert('Errore durante l\'invio del messaggio');
@@ -517,10 +528,10 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
         )}
         {messages.map((m, i) => (
           <React.Fragment key={i}>
-            {newMessagesCount > 0 && i === messages.length - newMessagesCount && (
+            {unreadMessageCount > 0 && i === unreadDividerIndex && (
               <div className="flex items-center gap-4 py-4">
                 <div className="h-px flex-1 bg-accent/20" />
-                <span className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">{newMessagesCount} nuovi messaggi</span>
+                <span className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">{unreadMessageCount} {unreadMessageCount === 1 ? 'messaggio non ancora letto' : 'messaggi non ancora letti'}</span>
                 <div className="h-px flex-1 bg-accent/20" />
               </div>
             )}
@@ -556,8 +567,9 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
   );
 };
 
-const CoachInbox = ({ unreadNotifications, onSelectAthlete, onBack, theme }: { 
+const CoachInbox = ({ unreadNotifications, conversations = [], onSelectAthlete, onBack, theme }: { 
   unreadNotifications: any[], 
+  conversations?: any[],
   onSelectAthlete: (senderId: number, senderName?: string) => void,
   onBack: () => void,
   theme?: 'dark' | 'light' 
@@ -582,7 +594,16 @@ const CoachInbox = ({ unreadNotifications, onSelectAthlete, onBack, theme }: {
     }, {} as Record<number, any>);
   }, [unreadNotifications]);
 
-  const items = Object.values(grouped).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const unreadItems = Object.values(grouped).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const items = unreadItems.length > 0
+    ? unreadItems
+    : conversations.map((conversation: any) => ({
+        sender_id: conversation.user_id,
+        sender_name: conversation.user_name,
+        last_message: conversation.last_message,
+        count: Number(conversation.unread_count || 0),
+        created_at: conversation.last_message_at
+      }));
 
   return (
     <div className="space-y-8">
@@ -599,7 +620,7 @@ const CoachInbox = ({ unreadNotifications, onSelectAthlete, onBack, theme }: {
              <div className="w-20 h-20 bg-zinc-900 rounded-3xl flex items-center justify-center mx-auto mb-4 border border-white/5">
                <Mail className="w-10 h-10 text-zinc-700" />
              </div>
-             <p className="text-zinc-500 font-bold uppercase tracking-widest text-xs italic">Nessun nuovo messaggio</p>
+             <p className="text-zinc-500 font-bold uppercase tracking-widest text-xs italic">Nessuna conversazione</p>
           </div>
         ) : (
           items.map((item: any) => (
@@ -618,9 +639,11 @@ const CoachInbox = ({ unreadNotifications, onSelectAthlete, onBack, theme }: {
                 </div>
               </div>
               <div className="flex items-center gap-4">
-                <div className="bg-accent text-black px-3 py-1 rounded-full text-[10px] font-black shadow-lg shadow-accent/20">
-                  {item.count}
-                </div>
+                {item.count > 0 && (
+                  <div className="bg-accent text-black px-3 py-1 rounded-full text-[10px] font-black shadow-lg shadow-accent/20">
+                    {item.count}
+                  </div>
+                )}
                 <ChevronRight className="w-5 h-5 text-zinc-700 group-hover:text-accent transition-all" />
               </div>
             </button>
@@ -2271,7 +2294,7 @@ const PTDashboard = ({ pt, theme, clients, exercises, models, refreshClients, re
   const fetchUnread = () => {
     fetch(`/api/notifications/${pt.id}`)
       .then(res => res.json())
-      .then(data => setUnreadCount(Array.isArray(data) ? data.length : 0))
+      .then(data => setUnreadCount(Array.isArray(data) ? countUnreadThreads(data) : 0))
       .catch(() => setUnreadCount(0));
   };
 
@@ -3385,7 +3408,7 @@ const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 
         return;
       }
       const data = await res.json();
-      setUnreadCount(Array.isArray(data) ? data.length : 0);
+      setUnreadCount(Array.isArray(data) ? countUnreadThreads(data) : 0);
     } catch {
       setUnreadCount(0);
     }
@@ -4087,6 +4110,7 @@ export default function App() {
   const [coach, setCoach] = useState<User | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadNotifications, setUnreadNotifications] = useState<any[]>([]);
+  const [conversations, setConversations] = useState<any[]>([]);
   const [chatDividerCount, setChatDividerCount] = useState(0);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
 
@@ -4099,6 +4123,7 @@ export default function App() {
     setSelectedClient(null);
     setUnreadCount(0);
     setUnreadNotifications([]);
+    setConversations([]);
     setChatDividerCount(0);
     setIsHeaderMenuOpen(false);
     setActiveTab('home');
@@ -4182,7 +4207,7 @@ export default function App() {
       }
       const data = await res.json();
       if (Array.isArray(data)) {
-        setUnreadCount(data.length);
+        setUnreadCount(countUnreadThreads(data));
         setUnreadNotifications(data);
         if (data.length === 0) {
           setChatDividerCount(0);
@@ -4200,11 +4225,32 @@ export default function App() {
     }
   };
 
+  const fetchConversations = async () => {
+    if (!user) return;
+    try {
+      const res = await fetch('/api/conversations');
+      if (res.status === 401 || res.status === 403) {
+        clearSession();
+        return;
+      }
+      const data = await res.json();
+      setConversations(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Error fetching conversations:", err);
+      setConversations([]);
+    }
+  };
+
   useEffect(() => {
     if (user) {
       fetchUnread();
+      fetchConversations();
       const interval = setInterval(fetchUnread, 5000);
-      return () => clearInterval(interval);
+      const conversationsInterval = setInterval(fetchConversations, 5000);
+      return () => {
+        clearInterval(interval);
+        clearInterval(conversationsInterval);
+      };
     }
   }, [user?.id]);
 
@@ -4288,6 +4334,7 @@ export default function App() {
     setCoach(null);
     setUnreadCount(0);
     setUnreadNotifications([]);
+    setConversations([]);
     setChatDividerCount(0);
     setIsHeaderMenuOpen(false);
     setActiveTab(u.role === 'pt' ? 'home' : 'dashboard');
@@ -4300,7 +4347,8 @@ export default function App() {
     } else {
       // Athlete logic
       if (unreadCount > 0) {
-        setChatDividerCount(unreadCount);
+        const countForCoach = coach ? unreadNotifications.filter(n => Number(n.sender_id) === Number(coach.id)).length : unreadNotifications.length;
+        setChatDividerCount(countForCoach);
         setUnreadCount(0);
         setUnreadNotifications([]);
       } else {
@@ -4523,6 +4571,7 @@ export default function App() {
                   onRead={() => {
                     setChatDividerCount(0);
                     fetchUnread();
+                    fetchConversations();
                   }}
                 />
               ) : (
@@ -4570,6 +4619,7 @@ export default function App() {
                     onRead={() => {
                       setChatDividerCount(0);
                       fetchUnread();
+                      fetchConversations();
                     }}
                   />
                 ) : (
@@ -4588,33 +4638,38 @@ export default function App() {
                 {user.role === 'pt' ? (
                   <CoachInbox 
                     unreadNotifications={unreadNotifications} 
+                    conversations={conversations}
                     onBack={() => setActiveTab('dashboard')} 
                     onSelectAthlete={(senderId, senderName) => {
+                      const conversation = conversations.find((c: any) => Number(c.user_id) === Number(senderId));
                       const client = clients.find(c => c.id === senderId) || {
                         id: senderId,
-                        name: senderName || 'Atleta',
-                        email: '',
+                        name: senderName || conversation?.user_name || 'Atleta',
+                        email: conversation?.user_email || '',
                         role: 'user' as Role
                       };
                       if (client) {
-                        const countForClient = unreadNotifications.filter(n => n.sender_id === senderId).length;
+                        const countForClient = unreadNotifications.filter(n => Number(n.sender_id) === Number(senderId)).length;
                         setChatDividerCount(countForClient);
                         setSelectedClient(client);
                         setPtTargetView('chat');
                         setActiveTab('dashboard');
                         // Local update to clear badge
-                        setUnreadNotifications(prev => prev.filter(n => n.sender_id !== senderId));
-                        setUnreadCount(prev => Math.max(0, prev - countForClient));
+                        const nextUnreadNotifications = unreadNotifications.filter(n => Number(n.sender_id) !== Number(senderId));
+                        setUnreadNotifications(nextUnreadNotifications);
+                        setUnreadCount(countUnreadThreads(nextUnreadNotifications));
+                        fetchConversations();
                       }
                     }} 
                     theme={theme} 
                   />
                 ) : (
                   <Notifications coachId={user.id} onBack={() => setActiveTab('dashboard')} onReply={(senderId) => {
-                    const countForSender = unreadNotifications.filter(n => n.sender_id === senderId).length;
+                    const countForSender = unreadNotifications.filter(n => Number(n.sender_id) === Number(senderId)).length;
                     setChatDividerCount(countForSender);
-                    setUnreadNotifications(prev => prev.filter(n => n.sender_id !== senderId));
-                    setUnreadCount(prev => Math.max(0, prev - countForSender));
+                    const nextUnreadNotifications = unreadNotifications.filter(n => Number(n.sender_id) !== Number(senderId));
+                    setUnreadNotifications(nextUnreadNotifications);
+                    setUnreadCount(countUnreadThreads(nextUnreadNotifications));
                     setActiveTab('chat');
                     setIsHeaderMenuOpen(false);
                   }} theme={theme} />

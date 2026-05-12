@@ -466,13 +466,48 @@ async function startServer() {
       return res.status(403).json({ error: "Accesso non consentito" });
     }
     const result = await db.execute({ sql: "INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)", args: [senderId, receiverId, safeContent] });
-    if (receiver && receiver.role === 'pt' && receiver.email_notifications_enabled) {
-      const sender = (await db.execute({ sql: "SELECT name FROM users WHERE id = ?", args: [senderId] })).rows[0] as any;
-      const targetEmail = receiver.notification_email || receiver.email;
-      await sendMail(targetEmail, "Nuova Notifica - Coach Bellu", `Hai ricevuto un nuovo messaggio da ${sender.name}: "${safeContent}"`);
-    }
     const inserted = await db.execute({ sql: "SELECT * FROM messages WHERE id = ?", args: [result.lastInsertRowid] });
     res.json(inserted.rows[0] || { id: result.lastInsertRowid, sender_id: senderId, receiver_id: receiverId, content: safeContent, is_read: 0, created_at: new Date().toISOString() });
+
+    if (receiver && receiver.role === 'pt' && receiver.email_notifications_enabled) {
+      const targetEmail = receiver.notification_email || receiver.email;
+      void sendMail(targetEmail, "Nuova Notifica - Coach Bellu", `Hai ricevuto un nuovo messaggio da ${req.user.name}: "${safeContent}"`);
+    }
+  });
+
+  app.get("/api/conversations", async (req: any, res) => {
+    const userId = req.user.id;
+    const result = await db.execute({
+      sql: `
+        SELECT
+          other_user.id as user_id,
+          other_user.name as user_name,
+          other_user.email as user_email,
+          other_user.role as user_role,
+          latest.content as last_message,
+          latest.created_at as last_message_at,
+          COALESCE(unread.unread_count, 0) as unread_count
+        FROM (
+          SELECT
+            CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END as other_id,
+            MAX(id) as last_message_id
+          FROM messages
+          WHERE sender_id = ? OR receiver_id = ?
+          GROUP BY other_id
+        ) threads
+        JOIN messages latest ON latest.id = threads.last_message_id
+        JOIN users other_user ON other_user.id = threads.other_id
+        LEFT JOIN (
+          SELECT sender_id as other_id, COUNT(*) as unread_count
+          FROM messages
+          WHERE receiver_id = ? AND is_read = 0
+          GROUP BY sender_id
+        ) unread ON unread.other_id = threads.other_id
+        ORDER BY latest.id DESC
+      `,
+      args: [userId, userId, userId, userId],
+    });
+    res.json(result.rows);
   });
 
   app.get("/api/messages/:userId", async (req: any, res) => {

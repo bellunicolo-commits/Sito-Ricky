@@ -437,11 +437,24 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
   const [loading, setLoading] = useState(false);
   const [chatError, setChatError] = useState('');
   const scrollRef = React.useRef<HTMLDivElement>(null);
-  const unreadMessageCount = Math.min(newMessagesCount, messages.length);
-  const unreadDividerIndex = unreadMessageCount > 0 ? messages.length - unreadMessageCount : -1;
+  const [unreadMessageCount, setUnreadMessageCount] = useState(newMessagesCount);
+  const unreadSnapshotSetRef = React.useRef(false);
+  const visibleUnreadMessageCount = Math.min(unreadMessageCount, messages.length);
+  const unreadDividerIndex = visibleUnreadMessageCount > 0 ? messages.length - visibleUnreadMessageCount : -1;
 
   const fetchMessages = async () => {
     try {
+      if (!unreadSnapshotSetRef.current) {
+        const unreadRes = await fetch(`/api/notifications/${currentUser.id}`);
+        if (unreadRes.ok) {
+          const unreadData = await unreadRes.json();
+          const threadUnreadCount = Array.isArray(unreadData)
+            ? unreadData.filter(message => Number(message.sender_id) === Number(otherUser.id)).length
+            : 0;
+          setUnreadMessageCount(threadUnreadCount || newMessagesCount);
+        }
+        unreadSnapshotSetRef.current = true;
+      }
       const res = await fetch(`/api/messages/${currentUser.id}?otherId=${otherUser.id}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -464,6 +477,10 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
   };
 
   useEffect(() => {
+    setMessages([]);
+    setChatError('');
+    setUnreadMessageCount(newMessagesCount);
+    unreadSnapshotSetRef.current = newMessagesCount > 0;
     fetchMessages();
     const interval = setInterval(fetchMessages, 5000);
     return () => clearInterval(interval);
@@ -528,10 +545,10 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
         )}
         {messages.map((m, i) => (
           <React.Fragment key={i}>
-            {unreadMessageCount > 0 && i === unreadDividerIndex && (
+            {visibleUnreadMessageCount > 0 && i === unreadDividerIndex && (
               <div className="flex items-center gap-4 py-4">
                 <div className="h-px flex-1 bg-accent/20" />
-                <span className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">{unreadMessageCount} {unreadMessageCount === 1 ? 'messaggio non ancora letto' : 'messaggi non ancora letti'}</span>
+                <span className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">{visibleUnreadMessageCount} {visibleUnreadMessageCount === 1 ? 'messaggio non ancora letto' : 'messaggi non ancora letti'}</span>
                 <div className="h-px flex-1 bg-accent/20" />
               </div>
             )}

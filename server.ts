@@ -323,6 +323,37 @@ async function startServer() {
 
   const canAccessUser = (req: any, userId: number) => req.user?.role === "pt" || req.user?.id === userId;
 
+  const getAssignedCoach = async (athleteId: number) => {
+    const fromPlan = await db.execute({
+      sql: `
+        SELECT u.id, u.name, u.email, u.role, u.bio, u.notification_email, u.email_notifications_enabled
+        FROM plans p
+        JOIN users u ON u.id = p.pt_id
+        WHERE p.user_id = ? AND u.role = 'pt'
+        ORDER BY p.id DESC
+        LIMIT 1
+      `,
+      args: [athleteId],
+    });
+    if (fromPlan.rows.length > 0) return fromPlan.rows[0] as any;
+
+    const fromMessages = await db.execute({
+      sql: `
+        SELECT u.id, u.name, u.email, u.role, u.bio, u.notification_email, u.email_notifications_enabled
+        FROM messages m
+        JOIN users u ON u.id = CASE WHEN m.sender_id = ? THEN m.receiver_id ELSE m.sender_id END
+        WHERE (m.sender_id = ? OR m.receiver_id = ?) AND u.role = 'pt'
+        ORDER BY m.id DESC
+        LIMIT 1
+      `,
+      args: [athleteId, athleteId, athleteId],
+    });
+    if (fromMessages.rows.length > 0) return fromMessages.rows[0] as any;
+
+    const fallback = await db.execute("SELECT id, name, email, role, bio, notification_email, email_notifications_enabled FROM users WHERE role = 'pt' ORDER BY id DESC LIMIT 1");
+    return (fallback.rows[0] as any) || null;
+  };
+
   const deleteUserData = async (userId: number) => {
     await db.execute({ sql: "DELETE FROM password_reset_tokens WHERE user_id = ?", args: [userId] });
     await db.execute({ sql: "DELETE FROM messages WHERE sender_id = ? OR receiver_id = ?", args: [userId, userId] });
@@ -451,64 +482,260 @@ async function startServer() {
   });
 
   app.post("/api/messages", async (req: any, res) => {
-    const { sender_id, receiver_id, content } = req.body;
-    const senderId = toId(sender_id);
-    const receiverId = toId(receiver_id);
+    const { receiver_id, content } = req.body;
+    const senderId = req.user.id;
+    let receiverId = toId(receiver_id);
     const safeContent = cleanText(content, 2000);
-    if (!senderId || !receiverId || !safeContent || senderId !== req.user.id) {
+    if (!receiverId || !safeContent || receiverId === senderId) {
       return res.status(400).json({ error: "Dati messaggio non validi" });
     }
-    const receiver = (await db.execute({ sql: "SELECT * FROM users WHERE id = ?", args: [receiverId] })).rows[0] as any;
+    let receiver = (await db.execute({ sql: "SELECT * FROM users WHERE id = ?", args: [receiverId] })).rows[0] as any;
     if (!receiver) {
       return res.status(404).json({ error: "Destinatario non trovato" });
+    }
+    if (req.user.role !== "pt" && receiver.role === "pt") {
+      const assignedCoach = await getAssignedCoach(senderId);
+      if (assignedCoach) {
+        receiverId = Number(assignedCoach.id);
+        receiver = assignedCoach;
+      }
     }
     if (req.user.role !== "pt" && receiver.role !== "pt") {
       return res.status(403).json({ error: "Accesso non consentito" });
     }
     const result = await db.execute({ sql: "INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)", args: [senderId, receiverId, safeContent] });
+    const inserted = await db.execute({ sql: "SELECT * FROM messages WHERE id = ?", args: [result.lastInsertRowid] });
+    res.json(inserted.rows[0] || { id: result.lastInsertRowid, sender_id: senderId, receiver_id: receiverId, content: safeContent, is_read: 0, created_at: new Date().toISOString() });
+
     if (receiver && receiver.role === 'pt' && receiver.email_notifications_enabled) {
-      const sender = (await db.execute({ sql: "SELECT name FROM users WHERE id = ?", args: [senderId] })).rows[0] as any;
       const targetEmail = receiver.notification_email || receiver.email;
-      await sendMail(targetEmail, "Nuova Notifica - Coach Bellu", `Hai ricevuto un nuovo messaggio da ${sender.name}: "${safeContent}"`);
+      void sendMail(targetEmail, "Nuova Notifica - Coach Bellu", `Hai ricevuto un nuovo messaggio da ${req.user.name}: "${safeContent}"`);
     }
-    res.json({ id: result.lastInsertRowid, sender_id: senderId, receiver_id: receiverId, content: safeContent });
+  });
+
+  app.get("/api/conversations", async (req: any, res) => {
+    const userId = req.user.id;
+    if (req.user.role === "pt") {
+      const result = await db.execute({
+        sql: `
+          SELECT
+            other_user.id as user_id,
+            other_user.name as user_name,
+            other_user.email as user_email,
+            other_user.role as user_role,
+            latest.content as last_message,
+            latest.created_at as last_message_at,
+            COALESCE(unread.unread_count, 0) as unread_count
+          FROM (
+            SELECT
+              CASE WHEN sender.role = 'user' THEN m.sender_id ELSE m.receiver_id END as other_id,
+              MAX(m.id) as last_message_id
+            FROM messages m
+            JOIN users sender ON sender.id = m.sender_id
+            JOIN users receiver ON receiver.id = m.receiver_id
+            WHERE (sender.role = 'user' AND receiver.role = 'pt')
+               OR (sender.role = 'pt' AND receiver.role = 'user')
+            GROUP BY other_id
+          ) threads
+          JOIN messages latest ON latest.id = threads.last_message_id
+          JOIN users other_user ON other_user.id = threads.other_id AND other_user.role = 'user'
+          LEFT JOIN (
+            SELECT m.sender_id as other_id, COUNT(*) as unread_count
+            FROM messages m
+            JOIN users receiver ON receiver.id = m.receiver_id
+            JOIN users sender ON sender.id = m.sender_id
+            WHERE receiver.role = 'pt' AND sender.role = 'user' AND m.is_read = 0
+            GROUP BY m.sender_id
+          ) unread ON unread.other_id = threads.other_id
+          ORDER BY latest.id DESC
+        `,
+        args: [],
+      });
+      return res.json(result.rows);
+    }
+
+    const result = await db.execute({
+      sql: `
+        SELECT
+          other_user.id as user_id,
+          other_user.name as user_name,
+          other_user.email as user_email,
+          other_user.role as user_role,
+          latest.content as last_message,
+          latest.created_at as last_message_at,
+          COALESCE(unread.unread_count, 0) as unread_count
+        FROM (
+          SELECT
+            CASE WHEN m.sender_id = ? THEN m.receiver_id ELSE m.sender_id END as other_id,
+            MAX(m.id) as last_message_id
+          FROM messages m
+          JOIN users sender ON sender.id = m.sender_id
+          JOIN users receiver ON receiver.id = m.receiver_id
+          WHERE (m.sender_id = ? AND receiver.role = 'pt')
+             OR (m.receiver_id = ? AND sender.role = 'pt')
+          GROUP BY other_id
+        ) threads
+        JOIN messages latest ON latest.id = threads.last_message_id
+        JOIN users other_user ON other_user.id = threads.other_id
+        LEFT JOIN (
+          SELECT sender_id as other_id, COUNT(*) as unread_count
+          FROM messages m
+          JOIN users sender ON sender.id = m.sender_id
+          WHERE receiver_id = ? AND sender.role = 'pt' AND is_read = 0
+          GROUP BY sender_id
+        ) unread ON unread.other_id = threads.other_id
+        ORDER BY latest.id DESC
+      `,
+      args: [userId, userId, userId, userId],
+    });
+    res.json(result.rows);
   });
 
   app.get("/api/messages/:userId", async (req: any, res) => {
-    const userId = toId(req.params.userId);
+    const userId = req.user.id;
     const otherId = toId(req.query.otherId);
-    if (!userId || !otherId || userId !== req.user.id) {
+    if (!otherId) {
       return res.status(403).json({ error: "Accesso non consentito" });
     }
-    const result = await db.execute({ sql: `SELECT * FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY created_at ASC`, args: [userId, otherId, otherId, userId] });
+    const other = (await db.execute({ sql: "SELECT id, role FROM users WHERE id = ?", args: [otherId] })).rows[0] as any;
+    if (!other || (req.user.role !== "pt" && other.role !== "pt")) {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
+
+    if (req.user.role === "pt") {
+      if (other.role !== "user") {
+        return res.status(403).json({ error: "Accesso non consentito" });
+      }
+      const result = await db.execute({
+        sql: `
+          SELECT m.*, CASE WHEN sender.role = 'pt' THEN 1 ELSE 0 END as is_mine
+          FROM messages m
+          JOIN users sender ON sender.id = m.sender_id
+          JOIN users receiver ON receiver.id = m.receiver_id
+          WHERE (sender.role = 'pt' AND m.receiver_id = ?)
+             OR (m.sender_id = ? AND receiver.role = 'pt')
+          ORDER BY m.created_at ASC, m.id ASC
+        `,
+        args: [otherId, otherId],
+      });
+      return res.json(result.rows);
+    }
+
+    const result = await db.execute({
+      sql: `
+        SELECT m.*, CASE WHEN m.sender_id = ? THEN 1 ELSE 0 END as is_mine
+        FROM messages m
+        JOIN users sender ON sender.id = m.sender_id
+        JOIN users receiver ON receiver.id = m.receiver_id
+        WHERE (m.sender_id = ? AND receiver.role = 'pt')
+           OR (m.receiver_id = ? AND sender.role = 'pt')
+        ORDER BY m.created_at ASC, m.id ASC
+      `,
+      args: [userId, userId, userId],
+    });
     res.json(result.rows);
   });
 
   app.get("/api/notifications/:userId", async (req: any, res) => {
-    const targetId = toId(req.params.userId);
-    if (!targetId || targetId !== req.user.id) {
-      return res.status(403).json({ error: "Accesso non consentito" });
+    const targetId = req.user.id;
+    if (req.user.role === "pt") {
+      const result = await db.execute({
+        sql: `
+          SELECT m.*, sender.name as sender_name, sender.role as sender_role
+          FROM messages m
+          JOIN users sender ON m.sender_id = sender.id
+          JOIN users receiver ON m.receiver_id = receiver.id
+          WHERE receiver.role = 'pt' AND sender.role = 'user' AND m.is_read = 0
+          ORDER BY m.created_at DESC, m.id DESC
+        `,
+        args: [],
+      });
+      return res.json(result.rows);
     }
-    const result = await db.execute({ sql: `SELECT m.*, u.name as sender_name FROM messages m JOIN users u ON m.sender_id = u.id WHERE m.receiver_id = ? AND m.sender_id != ? AND m.is_read = 0 ORDER BY m.created_at DESC`, args: [targetId, targetId] });
+
+    const result = await db.execute({
+      sql: `
+        SELECT m.*, u.name as sender_name, u.role as sender_role
+        FROM messages m
+        JOIN users u ON m.sender_id = u.id
+        WHERE m.receiver_id = ? AND u.role = 'pt' AND m.is_read = 0
+        ORDER BY m.created_at DESC, m.id DESC
+      `,
+      args: [targetId],
+    });
     res.json(result.rows);
   });
 
   app.get("/api/notifications/full/:userId", async (req: any, res) => {
-    const targetId = toId(req.params.userId);
-    if (!targetId || targetId !== req.user.id) {
-      return res.status(403).json({ error: "Accesso non consentito" });
+    const targetId = req.user.id;
+    if (req.user.role === "pt") {
+      const result = await db.execute({
+        sql: `
+          SELECT m.*, sender.name as sender_name, sender.role as sender_role
+          FROM messages m
+          JOIN users sender ON m.sender_id = sender.id
+          JOIN users receiver ON m.receiver_id = receiver.id
+          WHERE receiver.role = 'pt' AND sender.role = 'user'
+          ORDER BY m.created_at DESC, m.id DESC
+          LIMIT 100
+        `,
+        args: [],
+      });
+      return res.json(result.rows);
     }
-    const result = await db.execute({ sql: `SELECT m.*, u.name as sender_name FROM messages m JOIN users u ON m.sender_id = u.id WHERE m.receiver_id = ? AND m.sender_id != ? ORDER BY m.created_at DESC LIMIT 100`, args: [targetId, targetId] });
+
+    const result = await db.execute({
+      sql: `
+        SELECT m.*, u.name as sender_name, u.role as sender_role
+        FROM messages m
+        JOIN users u ON m.sender_id = u.id
+        WHERE m.receiver_id = ? AND u.role = 'pt'
+        ORDER BY m.created_at DESC, m.id DESC
+        LIMIT 100
+      `,
+      args: [targetId],
+    });
     res.json(result.rows);
   });
 
   app.patch("/api/messages/read", async (req: any, res) => {
-    const { receiverId, senderId } = req.body;
-    const receiver = toId(receiverId);
+    const { senderId } = req.body;
+    const receiver = req.user.id;
     const sender = toId(senderId);
-    if (!receiver || !sender || receiver !== req.user.id) {
+    if (!sender) {
       return res.status(403).json({ error: "Accesso non consentito" });
     }
+    const senderUser = (await db.execute({ sql: "SELECT id, role FROM users WHERE id = ?", args: [sender] })).rows[0] as any;
+    if (!senderUser) {
+      return res.status(403).json({ error: "Accesso non consentito" });
+    }
+
+    if (req.user.role === "pt" && senderUser.role === "user") {
+      await db.execute({
+        sql: `
+          UPDATE messages
+          SET is_read = 1
+          WHERE sender_id = ?
+            AND receiver_id IN (SELECT id FROM users WHERE role = 'pt')
+        `,
+        args: [sender],
+      });
+      return res.json({ success: true });
+    }
+
+    if (req.user.role !== "pt" && senderUser.role === "pt") {
+      await db.execute({
+        sql: `
+          UPDATE messages
+          SET is_read = 1
+          WHERE receiver_id = ?
+            AND sender_id IN (SELECT id FROM users WHERE role = 'pt')
+        `,
+        args: [receiver],
+      });
+      return res.json({ success: true });
+    }
+
     await db.execute({ sql: "UPDATE messages SET is_read = 1 WHERE receiver_id = ? AND sender_id = ?", args: [receiver, sender] });
     res.json({ success: true });
   });
@@ -565,10 +792,12 @@ async function startServer() {
     res.json(result.rows);
   });
 
-  app.get("/api/coach", async (req, res) => {
-    const result = await db.execute("SELECT id, name, email, role, bio FROM users WHERE role = 'pt' LIMIT 1");
-    if (result.rows.length > 0) {
-      res.json(result.rows[0]);
+  app.get("/api/coach", async (req: any, res) => {
+    const coach = req.user?.role === "user"
+      ? await getAssignedCoach(req.user.id)
+      : (await db.execute("SELECT id, name, email, role, bio FROM users WHERE role = 'pt' ORDER BY id DESC LIMIT 1")).rows[0];
+    if (coach) {
+      res.json(coach);
     } else {
       res.status(404).json({ error: "Coach non trovato" });
     }

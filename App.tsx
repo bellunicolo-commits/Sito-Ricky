@@ -449,9 +449,11 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
         if (unreadRes.ok) {
           const unreadData = await unreadRes.json();
           const threadUnreadCount = Array.isArray(unreadData)
-            ? unreadData.filter(message => Number(message.sender_id) === Number(otherUser.id)).length
+            ? currentUser.role === 'pt'
+              ? unreadData.filter(message => Number(message.sender_id) === Number(otherUser.id)).length
+              : unreadData.length
             : 0;
-          setUnreadMessageCount(threadUnreadCount || newMessagesCount);
+          setUnreadMessageCount(threadUnreadCount);
         }
         unreadSnapshotSetRef.current = true;
       }
@@ -480,7 +482,7 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
     setMessages([]);
     setChatError('');
     setUnreadMessageCount(newMessagesCount);
-    unreadSnapshotSetRef.current = newMessagesCount > 0;
+    unreadSnapshotSetRef.current = false;
     fetchMessages();
     const interval = setInterval(fetchMessages, 5000);
     return () => clearInterval(interval);
@@ -543,7 +545,9 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
             {chatError}
           </div>
         )}
-        {messages.map((m, i) => (
+        {messages.map((m, i) => {
+          const isMine = Number(m.is_mine) === 1 || Number(m.sender_id) === Number(currentUser.id);
+          return (
           <React.Fragment key={i}>
             {visibleUnreadMessageCount > 0 && i === unreadDividerIndex && (
               <div className="flex items-center gap-4 py-4">
@@ -552,20 +556,21 @@ const Chat = ({ currentUser, otherUser, onBack, theme, newMessagesCount = 0, onR
                 <div className="h-px flex-1 bg-accent/20" />
               </div>
             )}
-            <div className={`flex ${m.sender_id === currentUser.id ? 'justify-end' : 'justify-start'}`}>
+            <div className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[80%] p-4 rounded-2xl ${
-                m.sender_id === currentUser.id 
+                isMine
                   ? 'bg-accent text-black rounded-tr-none' 
                   : (theme === 'light' ? 'bg-zinc-200 text-zinc-900 rounded-tl-none' : 'bg-zinc-800 text-white rounded-tl-none')
               }`}>
                 <p className="text-sm font-bold">{m.content}</p>
-                <p className={`text-[10px] sm:text-[8px] mt-1 font-black uppercase opacity-40 ${m.sender_id === currentUser.id ? 'text-black' : (theme === 'light' ? 'text-zinc-900' : 'text-white')}`}>
+                <p className={`text-[10px] sm:text-[8px] mt-1 font-black uppercase opacity-40 ${isMine ? 'text-black' : (theme === 'light' ? 'text-zinc-900' : 'text-white')}`}>
                   {new Date(m.created_at).toLocaleDateString([], { day: '2-digit', month: '2-digit' })} • {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
             </div>
           </React.Fragment>
-        ))}
+          );
+        })}
       </div>
 
       <form onSubmit={handleSend} className={`p-6 border-t flex gap-3 ${theme === 'light' ? 'bg-zinc-100/50 border-zinc-200' : 'bg-zinc-900/50 border-white/5'}`}>
@@ -3425,7 +3430,7 @@ const UserDashboard = ({ user, theme, onAccountDeleted }: { user: User, theme?: 
         return;
       }
       const data = await res.json();
-      setUnreadCount(Array.isArray(data) ? countUnreadThreads(data) : 0);
+      setUnreadCount(Array.isArray(data) && data.length > 0 ? 1 : 0);
     } catch {
       setUnreadCount(0);
     }
@@ -4224,7 +4229,7 @@ export default function App() {
       }
       const data = await res.json();
       if (Array.isArray(data)) {
-        setUnreadCount(countUnreadThreads(data));
+        setUnreadCount(user.role === 'user' ? (data.length > 0 ? 1 : 0) : countUnreadThreads(data));
         setUnreadNotifications(data);
         if (data.length === 0) {
           setChatDividerCount(0);
@@ -4364,7 +4369,7 @@ export default function App() {
     } else {
       // Athlete logic
       if (unreadCount > 0) {
-        const countForCoach = coach ? unreadNotifications.filter(n => Number(n.sender_id) === Number(coach.id)).length : unreadNotifications.length;
+        const countForCoach = unreadNotifications.length;
         setChatDividerCount(countForCoach);
         setUnreadCount(0);
         setUnreadNotifications([]);
